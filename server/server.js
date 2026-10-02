@@ -5,12 +5,16 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-app.use(cors());
+
+app.use(cors({
+  origin: (origin, callback) => callback(null, true),
+  methods: ['GET', 'POST']
+}));
 
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: (origin, callback) => callback(null, true),
     methods: ['GET', 'POST']
   },
   path: '/socket.io/'
