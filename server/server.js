@@ -11,7 +11,7 @@ const rooms = new Map(); // callId -> { from, to, state, signaling }
 // Generate ID
 let nextId = 1;
 
-// REST API endpoints
+// API routes first (before static file serving)
 app.post('/api/register', (req, res) => {
   const { name } = req.body;
   const userId = nextId++;
@@ -87,6 +87,13 @@ app.post('/api/rooms/:callId/end', (req, res) => {
 const distPath = path.join(__dirname, '..', 'frontend', 'dist');
 app.use(express.static(distPath));
 
+// API error handler — log all 404s
+app.use((req, res, next) => {
+  console.log(`404: ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ error: 'Not found', path: req.originalUrl });
+});
+
+// SPA routing — must be last
 app.get('*', (req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });

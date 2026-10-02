@@ -89,7 +89,7 @@ function App() {
               from: myId,
               to: targetUserId
             })
-          });
+          }).catch(err => console.error('ICE fetch failed:', err));
         }
       };
 
@@ -116,7 +116,7 @@ function App() {
           from: myId,
           to: targetUserId
         })
-      });
+      }).catch(err => console.error('Offer fetch failed:', err));
 
       // Poll for answer
       pollForAnswer(callId, targetUserId);
