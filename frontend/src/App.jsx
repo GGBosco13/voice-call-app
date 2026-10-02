@@ -117,13 +117,18 @@ function App() {
       setMyId(data.userId);
       setIsLoggedIn(true);
     })
-    .catch(err => showToast('Failed to connect', 'error'));
+    .catch(err => {
+      console.error('Register failed:', err);
+      showToast('Failed to connect', 'error');
+    });
   }
 
   // Call someone
   async function startCall(targetUserId, targetUserName) {
     try {
+      console.log('Requesting microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('Microphone access granted');
       localStreamRef.current = stream;
 
       // Shared call ID: both caller and receiver know the IDs, so they can derive it
@@ -141,22 +146,22 @@ function App() {
           { urls: 'stun:stun.cloudflare.com:3478' },
           {
             urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelay@metered.ca',
+            username: 'openrelayproject',
             credential: 'openrelayproject',
           },
           {
             urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelay@metered.ca',
+            username: 'openrelayproject',
             credential: 'openrelayproject',
           },
           {
             urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelay@metered.ca',
+            username: 'openrelayproject',
             credential: 'openrelayproject',
           },
           {
             urls: 'turns:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelay@metered.ca',
+            username: 'openrelayproject',
             credential: 'openrelayproject',
           },
         ],
@@ -178,15 +183,38 @@ function App() {
       };
 
       pc.ontrack = (event) => {
+        console.log('ontrack received, stream:', event.streams[0]?.id, 'tracks:', event.streams[0]?.getTracks().length);
+        // Remove any previous remote audio
+        if (peerConnectionRef.current._remoteAudio) {
+          try { peerConnectionRef.current._remoteAudio.pause(); } catch {}
+          try { peerConnectionRef.current._remoteAudio.remove(); } catch {}
+        }
         const audio = document.createElement('audio');
+        audio.id = 'remote-audio';
         audio.autoplay = true;
         audio.playsInline = true;
+        audio.muted = false;
         audio.srcObject = event.streams[0];
-        audio.play().catch(() => {});
+        audio.play().then(() => {
+          console.log('Remote audio playing successfully');
+        }).catch((playErr) => {
+          console.warn('Autoplay blocked, will play on interaction:', playErr);
+          // Try playing on first user interaction
+          const tryPlay = () => {
+            audio.play().catch(() => {});
+            document.removeEventListener('click', tryPlay);
+            document.removeEventListener('touchstart', tryPlay);
+          };
+          document.addEventListener('click', tryPlay, { once: true });
+          document.addEventListener('touchstart', tryPlay, { once: true });
+        });
+        // Append to body so audio element exists in DOM
+        document.body.appendChild(audio);
         peerConnectionRef.current._remoteAudio = audio;
       };
 
       pc.onconnectionstatechange = () => {
+        console.log('Connection state:', pc.connectionState, 'signaling:', pc.signalingState, 'ice:', pc.iceConnectionState);
         if (pc.connectionState === 'connected') {
           setCallState('connected');
           startCallTimer();
@@ -212,7 +240,11 @@ function App() {
 
     } catch (err) {
       console.error('Error starting call:', err);
-      showToast('Microphone access denied', 'error');
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        showToast('Microphone access denied. Please allow in browser settings.', 'error');
+      } else {
+        showToast('Failed to start call: ' + err.message, 'error');
+      }
     }
   }
 
@@ -230,22 +262,22 @@ function App() {
         { urls: 'stun:stun.l.google.com:19302?transport=tls' },
         {
           urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelay@metered.ca',
+          username: 'openrelayproject',
           credential: 'openrelayproject',
         },
         {
           urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelay@metered.ca',
+          username: 'openrelayproject',
           credential: 'openrelayproject',
         },
         {
           urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelay@metered.ca',
+          username: 'openrelayproject',
           credential: 'openrelayproject',
         },
         {
           urls: 'turns:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelay@metered.ca',
+          username: 'openrelayproject',
           credential: 'openrelayproject',
         },
       ],
@@ -288,6 +320,7 @@ function App() {
       try {
         const res = await fetch(`${API_URL}/api/rooms/${callId}`);
         const room = await res.json();
+        console.log('pollForAnswer: room state =', room.state);
         if (room.state === 'answered' && room.answer) {
           const pc = peerConnectionRef.current;
           if (pc) {
@@ -314,7 +347,17 @@ function App() {
   // Answer an incoming call
   async function acceptCall(callId, fromUserId, fromUserName) {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('acceptCall: requesting microphone...');
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log('acceptCall: mic granted, tracks:', stream.getTracks().length);
+      } catch (micErr) {
+        console.error('acceptCall: mic denied', micErr);
+        showToast('Microphone access denied. Please allow in browser settings.', 'error');
+        setIncomingCall(null);
+        return;
+      }
       localStreamRef.current = stream;
 
       const pc = new RTCPeerConnection({
@@ -327,22 +370,22 @@ function App() {
           { urls: 'stun:stun.cloudflare.com:3478' },
           {
             urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelay@metered.ca',
+            username: 'openrelayproject',
             credential: 'openrelayproject',
           },
           {
             urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelay@metered.ca',
+            username: 'openrelayproject',
             credential: 'openrelayproject',
           },
           {
             urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelay@metered.ca',
+            username: 'openrelayproject',
             credential: 'openrelayproject',
           },
           {
             urls: 'turns:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelay@metered.ca',
+            username: 'openrelayproject',
             credential: 'openrelayproject',
           },
         ],
@@ -362,15 +405,38 @@ function App() {
       };
 
       pc.ontrack = (event) => {
+        console.log('ontrack received, stream:', event.streams[0]?.id, 'tracks:', event.streams[0]?.getTracks().length);
+        // Remove any previous remote audio
+        if (peerConnectionRef.current._remoteAudio) {
+          try { peerConnectionRef.current._remoteAudio.pause(); } catch {}
+          try { peerConnectionRef.current._remoteAudio.remove(); } catch {}
+        }
         const audio = document.createElement('audio');
+        audio.id = 'remote-audio';
         audio.autoplay = true;
         audio.playsInline = true;
+        audio.muted = false;
         audio.srcObject = event.streams[0];
-        audio.play().catch(() => {});
+        audio.play().then(() => {
+          console.log('Remote audio playing successfully');
+        }).catch((playErr) => {
+          console.warn('Autoplay blocked, will play on interaction:', playErr);
+          // Try playing on first user interaction
+          const tryPlay = () => {
+            audio.play().catch(() => {});
+            document.removeEventListener('click', tryPlay);
+            document.removeEventListener('touchstart', tryPlay);
+          };
+          document.addEventListener('click', tryPlay, { once: true });
+          document.addEventListener('touchstart', tryPlay, { once: true });
+        });
+        // Append to body so audio element exists in DOM
+        document.body.appendChild(audio);
         peerConnectionRef.current._remoteAudio = audio;
       };
 
       pc.onconnectionstatechange = () => {
+        console.log('Connection state:', pc.connectionState, 'signaling:', pc.signalingState, 'ice:', pc.iceConnectionState);
         if (pc.connectionState === 'connected') {
           setCallState('connected');
           startCallTimer();
