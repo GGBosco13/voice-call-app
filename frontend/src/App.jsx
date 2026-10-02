@@ -303,10 +303,18 @@ function App() {
 
   function handleLogout() {
     cleanupCall();
+    if (checkCallIntervalRef.current) {
+      clearInterval(checkCallIntervalRef.current);
+    }
     setIsLoggedIn(false);
     setMyName('');
     setMyId(null);
     setUsers([]);
+    setIncomingCall(null);
+    setCallState('idle');
+    setCurrentCall(null);
+    setCallTimer(0);
+    setToast(null);
   }
 
   // Login Screen
