@@ -97,6 +97,12 @@ function App() {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' },
+          {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelay@metered.ca',
+            credential: 'openrelayproject',
+          },
         ],
       });
       peerConnectionRef.current = pc;
@@ -158,6 +164,12 @@ function App() {
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' },
+          {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelay@metered.ca',
+            credential: 'openrelayproject',
+          },
         ],
       });
       peerConnectionRef.current = pc;
@@ -421,7 +433,10 @@ function App() {
             <div className="icon">👥</div>
             <p>No other users online yet</p>
             <p style={{ fontSize: '0.85rem', marginTop: '5px' }}>
-              Open another browser window to test calling
+              Open the same link in another browser/tab with a different name to see each other
+            </p>
+            <p style={{ fontSize: '0.8rem', marginTop: '10px', color: '#555' }}>
+              💡 Tip: Open this page twice in your browser — once with name "Alice", once with "Bob"
             </p>
           </div>
         )}
