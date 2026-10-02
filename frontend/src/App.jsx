@@ -19,14 +19,40 @@ function App() {
   const localStreamRef = useRef(null);
   const callTimerRef = useRef(null);
 
+  // Register user when name changes and socket is connected
+  useEffect(() => {
+    if (myName && socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('register', myName);
+    }
+  }, [myName]);
+
   // Initialize socket connection
   useEffect(() => {
     const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
+      path: '/socket.io/',
     });
+    console.log('Connecting to:', SOCKET_URL);
     socketRef.current = socket;
 
+    socket.on('connect', () => {
+      console.log('Socket connected, ID:', socket.id);
+      // Register if we already have a name (will also be caught by the effect above)
+      if (myName) {
+        socket.emit('register', myName);
+      }
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Socket disconnected');
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('Socket connect error:', err.message);
+    });
+
     socket.on('user-list', (usersList) => {
+      console.log('User list received:', usersList);
       setUsers(usersList.filter(u => u.id !== myId));
     });
 
@@ -75,8 +101,6 @@ function App() {
   function handleLogin(e) {
     e.preventDefault();
     if (!myName.trim()) return;
-
-    socketRef.current.emit('register', myName);
     // Generate a simple numeric ID from name
     const userId = myName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 1000 + 1;
     setMyId(userId);
