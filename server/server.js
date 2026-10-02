@@ -20,10 +20,7 @@ app.use((req, res, next) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: true,
-    methods: ['GET', 'POST']
-  },
+  cors: false,
   path: '/socket.io/',
   transports: ['polling'],
   allowEIO3: true
