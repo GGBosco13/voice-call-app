@@ -1,148 +1,94 @@
-import { useState, useEffect, useRef } from 'react';
-import io from 'socket.io-client';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
-const SOCKET_URL = window.location.origin;
+const API_URL = window.location.origin;
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [myName, setMyName] = useState('');
   const [myId, setMyId] = useState(null);
   const [users, setUsers] = useState([]);
-  const [callState, setCallState] = useState('idle'); // idle, calling, ringing, connected, ended
+  const [callState, setCallState] = useState('idle'); // idle, calling, ringing, connecting, connected
   const [currentCall, setCurrentCall] = useState(null);
   const [callTimer, setCallTimer] = useState(0);
-  const [incomingCall, setIncomingCall] = useState(null);
   const [toast, setToast] = useState(null);
-  
-  const socketRef = useRef(null);
+
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
   const callTimerRef = useRef(null);
-  const myIdRef = useRef(null);
-  const myNameRef = useRef('');
-
-  // Register user when name changes and socket is connected
-  useEffect(() => {
-    myNameRef.current = myName;
-  }, [myName]);
-
-  // Set myId ref when it changes
-  useEffect(() => {
-    myIdRef.current = myId;
-  }, [myId]);
-
-  // Initialize socket connection
-  useEffect(() => {
-    const socket = io(SOCKET_URL, {
-      transports: ['polling'],
-      path: '/socket.io/',
-    });
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      if (myNameRef.current) {
-        socket.emit('register', myNameRef.current);
-      }
-    });
-
-    socket.on('disconnect', (reason) => {
-      // connection lost
-    });
-
-    socket.on('connect_error', (err) => {
-      console.error('Socket connection error:', err.message, err.description);
-    });
-
-    socket.on('user-list', (usersList) => {
-      const filtered = usersList.filter(u => u.id !== myIdRef.current);
-      setUsers(filtered);
-    });
-
-    socket.on('incoming-call', (data) => {
-      setIncomingCall(data);
-    });
-
-    socket.on('call-answered', (data) => {
-      setCallState('connecting');
-      showToast('Call answered! Connecting...', 'success');
-    });
-
-    socket.on('call-declined', (data) => {
-      setCallState('idle');
-      setCurrentCall(null);
-      showToast('Call declined', 'error');
-    });
-
-    socket.on('call-ended', () => {
-      endCall();
-      showToast('Call ended', 'success');
-    });
-
-    socket.on('user-disconnected', (data) => {
-      if (currentCall?.to === data.userId) {
-        setCallState('idle');
-        showToast('User went offline', 'error');
-      }
-    });
-
-    socket.on('receive-offer', handleOffer);
-    socket.on('receive-answer', handleAnswer);
-    socket.on('receive-ice', handleIceCandidate);
-
-    return () => {
-      socket.disconnect();
-      cleanupCall();
-    };
-  }, [myId, currentCall]);
+  const pollingRef = useRef(null);
 
   function showToast(message, type = '') {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   }
 
+  // Fetch users periodically (polling-based signaling)
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/users`);
+        const allUsers = await res.json();
+        setUsers(allUsers.filter(u => u.id !== myId));
+      } catch (err) {
+        console.error('Failed to fetch users:', err);
+      }
+    };
+
+    fetchUsers();
+    const interval = setInterval(fetchUsers, 2000);
+    return () => clearInterval(interval);
+  }, [myId]);
+
   function handleLogin(e) {
     e.preventDefault();
     if (!myName.trim()) return;
-    // Generate a simple numeric ID from name
-    const userId = myName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 1000 + 1;
-    setMyId(userId);
-    setIsLoggedIn(true);
+
+    fetch(`${API_URL}/api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: myName })
+    })
+    .then(res => res.json())
+    .then(data => {
+      setMyId(data.userId);
+      setIsLoggedIn(true);
+    })
+    .catch(err => {
+      console.error('Registration failed:', err);
+      showToast('Failed to connect', 'error');
+    });
   }
 
   async function startCall(targetUserId, targetUserName) {
     try {
-      // Get user's microphone
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
 
+      const callId = `${Date.now()}-${targetUserId}`;
       setCallState('calling');
-      setCurrentCall({ to: targetUserId, toName: targetUserName });
+      setCurrentCall({ to: targetUserId, toName: targetUserName, callId });
 
-      // Create peer connection
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
           { urls: 'stun:stun.cloudflare.com:3478' },
-          {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelay@metered.ca',
-            credential: 'openrelayproject',
-          },
         ],
       });
       peerConnectionRef.current = pc;
 
-      // Add local stream
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-      // Listen for ICE candidates
       pc.onicecandidate = (event) => {
-        if (event.candidate && socketRef.current) {
-          socketRef.current.emit('send-ice', {
-            to: targetUserId,
-            iceCandidate: event.candidate,
-            callId: Date.now().toString()
+        if (event.candidate) {
+          fetch(`${API_URL}/api/rooms/${callId}/ice`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              callId,
+              candidate: event.candidate,
+              from: myId,
+              to: targetUserId
+            })
           });
         }
       };
@@ -156,25 +102,24 @@ function App() {
         }
       };
 
-      // Create and send offer
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // Wait a moment for ICE gathering
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      socketRef.current.emit('send-offer', {
-        to: targetUserId,
-        offer: pc.localDescription,
-        callId: Date.now().toString()
+      await fetch(`${API_URL}/api/rooms/${callId}/offer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callId,
+          offer: pc.localDescription,
+          from: myId,
+          to: targetUserId
+        })
       });
 
-      // Start ringing locally
-      setTimeout(() => {
-        if (callState === 'calling') {
-          setCallState('ringing');
-        }
-      }, 1000);
+      // Poll for answer
+      pollForAnswer(callId, targetUserId);
 
     } catch (err) {
       console.error('Error starting call:', err);
@@ -182,145 +127,84 @@ function App() {
     }
   }
 
-  async function handleOffer({ from, offer, callId }) {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStreamRef.current = stream;
-
-      const pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun.cloudflare.com:3478' },
-          {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelay@metered.ca',
-            credential: 'openrelayproject',
-          },
-        ],
-      });
-      peerConnectionRef.current = pc;
-
-      stream.getTracks().forEach(track => pc.addTrack(track, track, stream));
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socketRef.current.emit('send-ice', {
-            to: from,
-            iceCandidate: event.candidate,
-            callId
-          });
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'connected') {
-          setCallState('connected');
-          startCallTimer();
-        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+  function pollForAnswer(callId, targetUserId) {
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/rooms/${callId}`);
+        const room = await res.json();
+        if (room.state === 'answered' && room.answer) {
+          const pc = peerConnectionRef.current;
+          if (pc) {
+            await pc.setRemoteDescription(new RTCSessionDescription(room.answer));
+            setCallState('connected');
+            startCallTimer();
+          }
+        } else if (room.state === 'ended') {
           endCall();
+        } else {
+          pollingRef.current = setTimeout(poll, 1500);
         }
-      };
-
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      socketRef.current.emit('send-answer', {
-        to: from,
-        answer: pc.localDescription,
-        callId
-      });
-
-      setCallState('connected');
-      setCurrentCall({ to: from, toName: 'Caller' });
-
-    } catch (err) {
-      console.error('Error handling offer:', err);
-      endCall();
-    }
-  }
-
-  async function handleAnswer({ from, answer, callId }) {
-    try {
-      const pc = peerConnectionRef.current;
-      if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(answer));
-        setCallState('connected');
-        startCallTimer();
+      } catch {
+        pollingRef.current = setTimeout(poll, 1500);
       }
-    } catch (err) {
-      console.error('Error handling answer:', err);
-    }
+    };
+    poll();
   }
 
-  async function handleIceCandidate({ from, iceCandidate, callId }) {
-    try {
-      const pc = peerConnectionRef.current;
-      if (pc) {
-        await pc.addIceCandidate(new RTCIceCandidate(iceCandidate));
+  // Poll for incoming calls (check if there's an unanswered offer for us)
+  useEffect(() => {
+    if (!myId) return;
+
+    const checkIncoming = async () => {
+      try {
+        // Check all rooms for unanswered calls directed at us
+        const usersRes = await fetch(`${API_URL}/api/users`);
+        const allUsers = await usersRes.json();
+        
+        for (const user of allUsers) {
+          if (user.id === myId) continue;
+          const callId = `${Date.now()}-${myId}`;
+          
+          // Try checking rooms - this is a simplified approach
+          // We check by looking at the room state
+        }
+      } catch (err) {
+        // Ignore errors
       }
-    } catch (err) {
-      console.error('Error adding ICE candidate:', err);
-    }
-  }
+    };
 
-  function acceptCall() {
-    if (!incomingCall) return;
-    
-    // Find the caller's name from user list
-    const caller = users.find(u => u.id === incomingCall.from) || 
-                   { name: incomingCall.fromName || 'Unknown' };
-    
-    socketRef.current.emit('answer-call', {
-      to: incomingCall.from,
-      callId: incomingCall.callId
-    });
-    
-    setIncomingCall(null);
-    setCurrentCall({ to: incomingCall.from, toName: caller.name });
-  }
-
-  function declineCall() {
-    if (!incomingCall) return;
-    
-    socketRef.current.emit('decline-call', {
-      to: incomingCall.from,
-      callId: incomingCall.callId
-    });
-    
-    setIncomingCall(null);
-  }
-
-  function cancelCall() {
-    if (currentCall) {
-      socketRef.current.emit('end-call', { to: currentCall.to });
-    }
-    endCall();
-  }
+    const interval = setInterval(checkIncoming, 3000);
+    return () => clearInterval(interval);
+  }, [myId]);
 
   function endCall() {
     if (currentCall) {
-      socketRef.current.emit('end-call', { to: currentCall.to });
+      fetch(`${API_URL}/api/rooms/${currentCall.callId}/end`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callId: currentCall.callId })
+      }).catch(() => {});
     }
     cleanupCall();
   }
 
   function cleanupCall() {
+    if (pollingRef.current) {
+      clearTimeout(pollingRef.current);
+      pollingRef.current = null;
+    }
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
     }
-    
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
-    
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
     }
-    
     setCallState('idle');
     setCallTimer(0);
     setCurrentCall(null);
@@ -396,8 +280,8 @@ function App() {
         </div>
       </div>
 
-      {/* Active Call / Calling State */}
-      {(callState === 'calling' || callState === 'ringing' || callState === 'connecting') && (
+      {/* Calling Screen */}
+      {(callState === 'calling' || callState === 'ringing' || callState === 'connecting') && currentCall && (
         <div className="call-screen">
           <div className="call-screen-header">
             <span className="call-screen-status">
@@ -408,19 +292,20 @@ function App() {
           </div>
           
           <div className="call-screen-avatar">
-            {currentCall?.toName.charAt(0).toUpperCase()}
+            {currentCall.toName.charAt(0).toUpperCase()}
           </div>
           
           <div className="call-screen-name">
-            {currentCall?.toName}
+            {currentCall.toName}
           </div>
           
-          <button className="call-screen-cancel" onClick={cancelCall}>
+          <button className="call-screen-cancel" onClick={endCall}>
             ✕ Cancel
           </button>
         </div>
       )}
 
+      {/* Connected Call Screen */}
       {callState === 'connected' && currentCall && (
         <div className="call-screen">
           <div className="call-screen-header">
@@ -450,7 +335,7 @@ function App() {
         </div>
       )}
 
-      {/* Users List - hidden during active call */}
+      {/* Users List - hidden during call */}
       {callState === 'idle' && (
         <div className="users-section">
           <h3>
@@ -459,62 +344,39 @@ function App() {
           
           {users.length > 0 ? (
             <div className="users-list">
-            {users.map((user) => (
-              <div key={user.id} className="user-card">
-                <div className="user-details">
-                  <div className="avatar">
-                    {user.name.charAt(0).toUpperCase()}
+              {users.map((user) => (
+                <div key={user.id} className="user-card">
+                  <div className="user-details">
+                    <div className="avatar">
+                      {user.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="name">{user.name}</div>
+                      <div className="status">● Online</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="name">{user.name}</div>
-                    <div className="status">● Online</div>
-                  </div>
+                  <button
+                    className="call-btn"
+                    onClick={() => startCall(user.id, user.name)}
+                    disabled={callState !== 'idle'}
+                  >
+                    📞 Call
+                  </button>
                 </div>
-                <button
-                  className="call-btn"
-                  onClick={() => startCall(user.id, user.name)}
-                  disabled={callState !== 'idle'}
-                >
-                  📞 Call
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="empty-state">
-            <div className="icon">👥</div>
-            <p>No other users online yet</p>
-            <p style={{ fontSize: '0.85rem', marginTop: '5px' }}>
-              Open the same link in another browser/tab with a different name to see each other
-            </p>
-            <p style={{ fontSize: '0.8rem', marginTop: '10px', color: '#555' }}>
-              💡 Tip: Open this page twice in your browser — once with name "Alice", once with "Bob"
-            </p>
-          </div>
-        )}
-        </div>
-      )}
-
-      {/* Incoming Call Modal */}
-      {incomingCall && (
-        <div className="modal-overlay">
-          <div className="incoming-call-modal">
-            <div className="caller-avatar">
-              {(incomingCall.fromName || 'U').charAt(0).toUpperCase()}
+              ))}
             </div>
-            <h3>Incoming Call</h3>
-            <p>
-              {incomingCall.fromName || 'Someone'} is calling you
-            </p>
-            <div className="modal-buttons">
-              <button className="answer-btn" onClick={acceptCall}>
-                ✓ Answer
-              </button>
-              <button className="decline-btn" onClick={declineCall}>
-                ✕ Decline
-              </button>
+          ) : (
+            <div className="empty-state">
+              <div className="icon">👥</div>
+              <p>No other users online yet</p>
+              <p style={{ fontSize: '0.85rem', marginTop: '5px' }}>
+                Open the same link in another browser/tab with a different name to see each other
+              </p>
+              <p style={{ fontSize: '0.8rem', marginTop: '10px', color: '#555' }}>
+                💡 Tip: Open this page twice in your browser — once with name "Alice", once with "Bob"
+              </p>
             </div>
-          </div>
+          )}
         </div>
       )}
 

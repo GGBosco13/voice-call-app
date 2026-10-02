@@ -1,147 +1,93 @@
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
 const path = require('path');
 
 const app = express();
+app.use(express.json());
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  next();
-});
+// Simple in-memory store
+const rooms = new Map(); // callId -> { from, to, state, signaling }
 
-const server = http.createServer(app);
-const io = new Server(server, {
-  path: '/socket.io/',
-  transports: ['polling'],
-  allowEIO3: true
-});
-
-// Ensure CORS headers are present on socket.io responses
-const originalEmit = io.engine.emit.bind(io.engine);
-io.engine.emit = function(evt, ...args) {
-  if (evt === 'response') {
-    // The response packet, add CORS headers
-    const res = args[1];
-    if (res && res.setHeader) {
-      const origin = res.req && res.req.headers && res.req.headers.origin;
-      if (origin) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
-      }
-    }
-  }
-  return originalEmit(evt, ...args);
-};
-
-// Store connected users
-const users = new Map(); // socketId -> { id, name }
+// Generate ID
 let nextId = 1;
 
-io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
-  console.log(`  Transport: ${socket.conn.transport.name}`);
-  console.log(`  Client IP: ${socket.handshake.headers['x-forwarded-for'] || socket.handshake.address}`);
+// REST API endpoints
+app.post('/api/register', (req, res) => {
+  const { name } = req.body;
+  const userId = nextId++;
+  const socketId = userId.toString();
+  rooms.set(socketId, { userId, name, connectedAt: Date.now() });
+  console.log(`Registered: ${name} as user ${userId}`);
+  res.json({ userId, socketId });
+});
 
-  socket.on('register', (name) => {
-    const userId = nextId++;
-    users.set(socket.id, { id: userId, name });
-    console.log(`  Registered: ${name} as user ${userId}`);
-    broadcastUserList();
-  });
+app.get('/api/users', (req, res) => {
+  const userList = Array.from(rooms.values()).map(u => ({
+    id: u.userId,
+    name: u.name
+  }));
+  res.json(userList);
+});
 
-  socket.on('disconnect', (reason) => {
-    console.log(`Client disconnected: ${socket.id}, reason: ${reason}`);
-    const user = users.get(socket.id);
-    if (user) {
-      users.delete(socket.id);
-      broadcastUserList();
-      io.emit('user-disconnected', { userId: user.id });
-    }
-  });
+app.get('/api/rooms/:callId', (req, res) => {
+  const room = rooms.get(req.params.callId);
+  if (!room) return res.status(404).json({ error: 'Not found' });
+  res.json(room);
+});
 
-  socket.on('error', (err) => {
-    console.error(`Socket error for ${socket.id}:`, err.message);
-  });
+app.post('/api/rooms/:callId/offer', (req, res) => {
+  const { callId, offer, from, to } = req.body;
+  const room = rooms.get(callId);
+  if (!room) return res.status(404).json({ error: 'Not found' });
+  room.from = from;
+  room.to = to;
+  room.offer = offer;
+  room.state = 'offered';
+  console.log(`Offer sent from ${from} to ${to} for room ${callId}`);
+  res.json({ status: 'sent' });
+});
 
-  socket.on('call-user', ({ to, from, fromName }) => {
-    const targetSocket = Array.from(users.entries())
-      .find(([socketId, user]) => user.id === to)?.[0];
-    if (targetSocket) {
-      io.to(targetSocket).emit('incoming-call', {
-        from, fromName, callId: Date.now().toString()
-      });
-    }
-  });
-
-  socket.on('answer-call', ({ to, callId }) => {
-    const targetSocket = Array.from(users.entries())
-      .find(([socketId, user]) => user.id === to)?.[0];
-    if (targetSocket) {
-      io.to(targetSocket).emit('call-answered', { callId });
-    }
-  });
-
-  socket.on('decline-call', ({ to, callId }) => {
-    const targetSocket = Array.from(users.entries())
-      .find(([socketId, user]) => user.id === to)?.[0];
-    if (targetSocket) {
-      io.to(targetSocket).emit('call-declined', { callId });
-    }
-  });
-
-  socket.on('end-call', ({ to }) => {
-    const targetSocket = Array.from(users.entries())
-      .find(([socketId, user]) => user.id === to)?.[0];
-    if (targetSocket) {
-      io.to(targetSocket).emit('call-ended');
-    }
-  });
-
-  socket.on('send-offer', ({ to, offer, callId }) => {
-    const targetSocket = Array.from(users.entries())
-      .find(([socketId, user]) => user.id === to)?.[0];
-    if (targetSocket) {
-      io.to(targetSocket).emit('receive-offer', { from: socket.id, offer, callId });
-    }
-  });
-
-  socket.on('send-answer', ({ to, answer, callId }) => {
-    const targetSocket = Array.from(users.entries())
-      .find(([socketId, user]) => user.id === to)?.[0];
-    if (targetSocket) {
-      io.to(targetSocket).emit('receive-answer', { from: socket.id, answer, callId });
-    }
-  });
-
-  socket.on('send-ice', ({ to, iceCandidate, callId }) => {
-    const targetSocket = Array.from(users.entries())
-      .find(([socketId, user]) => user.id === to)?.[0];
-    if (targetSocket) {
-      io.to(targetSocket).emit('receive-ice', { from: socket.id, iceCandidate, callId });
-    }
+app.get('/api/rooms/:callId/waiting', (req, res) => {
+  // Check if there's an unanswered call
+  const room = rooms.get(req.params.callId);
+  if (!room || room.state !== 'offered') return res.json({ waiting: false });
+  res.json({
+    waiting: true,
+    from: room.from,
+    offer: room.offer
   });
 });
 
-function broadcastUserList() {
-  const userList = Array.from(users.values()).map(u => ({ id: u.id, name: u.name }));
-  io.emit('user-list', userList);
-}
+app.post('/api/rooms/:callId/answer', (req, res) => {
+  const { callId, answer, from, to } = req.body;
+  const room = rooms.get(callId);
+  if (!room) return res.status(404).json({ error: 'Not found' });
+  room.answer = answer;
+  room.state = 'answered';
+  console.log(`Call answered for room ${callId}`);
+  res.json({ status: 'answered' });
+});
 
-// Serve the built frontend in production
+app.post('/api/rooms/:callId/ice', (req, res) => {
+  const { callId, candidate, from, to } = req.body;
+  const room = rooms.get(callId);
+  if (!room) return res.status(404).json({ error: 'Not found' });
+  room.iceCandidates = room.iceCandidates || [];
+  room.iceCandidates.push({ candidate, from });
+  res.json({ status: 'received' });
+});
+
+app.post('/api/rooms/:callId/end', (req, res) => {
+  const { callId } = req.body;
+  rooms.delete(callId);
+  res.json({ status: 'ended' });
+});
+
+// Serve the built frontend
 const distPath = path.join(__dirname, '..', 'frontend', 'dist');
 app.use(express.static(distPath));
 
-// SPA routing - only catch routes that aren't socket.io paths
-app.get(/^((?!(\/socket\.io\/)).)*$/, (req, res) => {
+app.get('*', (req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
@@ -149,3 +95,5 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Voice call server running on port ${PORT}`);
 });
+
+const server = http.createServer(app);
