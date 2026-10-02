@@ -131,9 +131,9 @@ function App() {
   // Call someone
   async function startCall(targetUserId, targetUserName) {
     try {
-      console.log('Requesting microphone access...');
+      console.log('=== startCall: Requesting microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      console.log('Microphone access granted, tracks:', stream.getTracks().length);
+      console.log('=== startCall: Microphone access granted, tracks:', stream.getTracks().length);
       localStreamRef.current = stream;
 
       const callId = `${Math.min(myId, targetUserId)}-${Math.max(myId, targetUserId)}`;
@@ -145,40 +145,23 @@ function App() {
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
           { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
           { urls: 'stun:stun.cloudflare.com:3478' },
           { urls: 'stun:global.stun.twilio.com:3478?transport=udp' },
-          {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
-          {
-            urls: 'turns:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
         ],
       });
       peerConnectionRef.current = pc;
 
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      console.log('=== startCall: Tracks added to peer connection');
 
-      // ICE candidates: send each one as it's gathered
+      const iceCandidates = [];
+
+      // ICE candidates: buffer and send all at once after gathering
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          console.log('Caller: ICE candidate gathered, sending to server');
+          console.log('=== startCall: ICE candidate:', event.candidate.candidate.substring(0, 60));
+          iceCandidates.push(event.candidate);
+          // Also send immediately for fast ICE
           fetch(`${API_URL}/api/rooms/${callId}/ice`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -186,12 +169,14 @@ function App() {
               callId, candidate: event.candidate, from: myId, to: targetUserId
             })
           }).catch(() => {});
+        } else {
+          console.log('=== startCall: ICE gathering complete, total candidates:', iceCandidates.length);
         }
       };
 
       // Receive remote audio track
       pc.ontrack = (event) => {
-        console.log('Caller: ontrack received, remote tracks:', event.streams[0]?.getTracks().length);
+        console.log('=== startCall: ontrack received, remote tracks:', event.streams[0]?.getTracks().length);
         if (peerConnectionRef.current._remoteAudio) {
           try { peerConnectionRef.current._remoteAudio.pause(); } catch {}
           try { peerConnectionRef.current._remoteAudio.remove(); } catch {}
@@ -201,47 +186,52 @@ function App() {
         audio.playsInline = true;
         audio.srcObject = event.streams[0];
         audio.play().then(() => {
-          console.log('Caller: remote audio playing');
+          console.log('=== startCall: remote audio playing');
         }).catch((e) => {
-          console.warn('Caller: autoplay blocked:', e);
+          console.warn('=== startCall: autoplay blocked:', e);
         });
         document.body.appendChild(audio);
         peerConnectionRef.current._remoteAudio = audio;
       };
 
       pc.onconnectionstatechange = () => {
-        console.log('Caller: connectionState=', pc.connectionState, 'ice=', pc.iceConnectionState);
+        console.log('=== startCall: connectionState=', pc.connectionState, 'ice=', pc.iceConnectionState);
         if (pc.connectionState === 'connected') {
+          console.log('=== startCall: CONNECTED!');
           setCallState('connected');
           startCallTimer();
         } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.iceConnectionState === 'failed') {
-          console.log('Caller: call failed, ending');
+          console.log('=== startCall: call failed, ending');
           endCall();
         }
       };
 
-      // Create offer and wait for ICE gathering to complete (includes TURN candidates in SDP)
+      // Create offer with trickle ICE disabled via SDP munging
+      // We send offer immediately, then send ICE candidates as they arrive
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      console.log('Caller: waiting for ICE gathering...');
+      console.log('=== startCall: offer created and set, waiting for first ICE candidate...');
 
+      // Wait for at least a few ICE candidates (STUN host + srflx) before sending offer
+      // This ensures we have at least one public IP candidate in the SDP trickle stream
       await new Promise((resolve) => {
         const checkDone = () => {
-          if (pc.iceGatheringState === 'complete') {
-            console.log('Caller: ICE gathering complete!');
+          // Wait for at least 2 ICE candidates (host + srflx) or 3 seconds max
+          if (iceCandidates.length >= 2) {
+            console.log('=== startCall: Got', iceCandidates.length, 'ICE candidates, sending offer');
             resolve();
           }
         };
-        const interval = setInterval(checkDone, 100);
+        const interval = setInterval(checkDone, 50);
         setTimeout(() => {
           clearInterval(interval);
-          console.log('Caller: ICE gathering timeout, sending anyway');
+          console.log('=== startCall: Timeout after 3s, sending offer with', iceCandidates.length, 'candidates');
           resolve();
-        }, 8000);
+        }, 3000);
         checkDone();
       });
 
-      console.log('Caller: sending offer with full ICE info');
+      console.log('=== startCall: Sending offer to server');
       await fetch(`${API_URL}/api/rooms/${callId}/offer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -249,12 +239,13 @@ function App() {
           callId, offer: pc.localDescription, from: myId, to: targetUserId,
           fromName: myName
         })
-      }).catch(() => {});
+      }).catch((e) => console.error('=== startCall: Failed to send offer:', e));
 
+      console.log('=== startCall: Started polling for answer');
       pollForAnswer(callId);
 
     } catch (err) {
-      console.error('Error starting call:', err);
+      console.error('=== startCall: Error starting call:', err);
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         showToast('Microphone access denied. Please allow in browser settings.', 'error');
       } else {
@@ -364,13 +355,13 @@ function App() {
   // Answer an incoming call
   async function acceptCall(callId, fromUserId, fromUserName) {
     try {
-      console.log('acceptCall: requesting microphone...');
+      console.log('=== acceptCall: Requesting microphone...');
       let stream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        console.log('acceptCall: mic granted, tracks:', stream.getTracks().length);
+        console.log('=== acceptCall: Mic granted, tracks:', stream.getTracks().length);
       } catch (micErr) {
-        console.error('acceptCall: mic denied', micErr);
+        console.error('=== acceptCall: Mic denied', micErr);
         showToast('Microphone access denied. Please allow in browser settings.', 'error');
         setIncomingCall(null);
         return;
@@ -382,48 +373,33 @@ function App() {
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
           { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
           { urls: 'stun:stun.cloudflare.com:3478' },
-          {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
-          {
-            urls: 'turns:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject',
-          },
+          { urls: 'stun:global.stun.twilio.com:3478?transport=udp' },
         ],
       });
       peerConnectionRef.current = pc;
 
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      console.log('=== acceptCall: Tracks added to peer connection');
+
+      const iceCandidates = [];
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          console.log('Callee: ICE candidate gathered, sending to server');
+          console.log('=== acceptCall: ICE candidate:', event.candidate.candidate.substring(0, 60));
+          iceCandidates.push(event.candidate);
           fetch(`${API_URL}/api/rooms/${callId}/ice`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ callId, candidate: event.candidate, from: myId, to: fromUserId })
           }).catch(() => {});
+        } else {
+          console.log('=== acceptCall: ICE gathering complete, total:', iceCandidates.length);
         }
       };
 
       pc.ontrack = (event) => {
-        console.log('Callee: ontrack received, remote tracks:', event.streams[0]?.getTracks().length);
+        console.log('=== acceptCall: ontrack received, remote tracks:', event.streams[0]?.getTracks().length);
         if (peerConnectionRef.current._remoteAudio) {
           try { peerConnectionRef.current._remoteAudio.pause(); } catch {}
           try { peerConnectionRef.current._remoteAudio.remove(); } catch {}
@@ -433,9 +409,9 @@ function App() {
         audio.playsInline = true;
         audio.srcObject = event.streams[0];
         audio.play().then(() => {
-          console.log('Callee: remote audio playing');
+          console.log('=== acceptCall: remote audio playing');
         }).catch((e) => {
-          console.warn('Callee: autoplay blocked:', e);
+          console.warn('=== acceptCall: autoplay blocked:', e);
         });
         document.body.appendChild(audio);
         peerConnectionRef.current._remoteAudio = audio;
@@ -444,12 +420,13 @@ function App() {
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
         const iceState = pc.iceConnectionState;
-        console.log('Callee: connectionState=', state, 'ice=', iceState);
+        console.log('=== acceptCall: connectionState=', state, 'ice=', iceState);
         if (state === 'connected') {
+          console.log('=== acceptCall: CONNECTED!');
           setCallState('connected');
           startCallTimer();
         } else if (state === 'disconnected' || state === 'failed' || iceState === 'failed') {
-          console.log('Callee: call failed, ending');
+          console.log('=== acceptCall: call failed, ending');
           endCall();
         }
       };
@@ -465,25 +442,25 @@ function App() {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      // Wait for ICE gathering before sending the answer (so TURN candidates are included in SDP)
-      console.log('Callee: waiting for ICE gathering...');
+      // Wait briefly for a few ICE candidates, then send answer immediately
+      console.log('=== acceptCall: Waiting for ICE candidates...');
       await new Promise((resolve) => {
         const checkDone = () => {
-          if (pc.iceGatheringState === 'complete') {
-            console.log('Callee: ICE gathering complete!');
+          if (iceCandidates.length >= 2) {
+            console.log('=== acceptCall: Got', iceCandidates.length, 'ICE candidates');
             resolve();
           }
         };
-        const interval = setInterval(checkDone, 100);
+        const interval = setInterval(checkDone, 50);
         setTimeout(() => {
           clearInterval(interval);
-          console.log('Callee: ICE gathering timeout, sending anyway');
+          console.log('=== acceptCall: Timeout after 3s, sending answer with', iceCandidates.length, 'candidates');
           resolve();
-        }, 8000);
+        }, 3000);
         checkDone();
       });
 
-      console.log('Callee: sending answer with full ICE info');
+      console.log('=== acceptCall: Sending answer to server');
       await fetch(`${API_URL}/api/rooms/${callId}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
