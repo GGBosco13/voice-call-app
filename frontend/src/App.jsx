@@ -390,35 +390,60 @@ function App() {
 
       {/* Active Call / Calling State */}
       {(callState === 'calling' || callState === 'ringing' || callState === 'connecting') && (
-        <div className="calling-message">
-          <div className="spinner"></div>
-          <p>
-            {callState === 'calling' && `Calling ${currentCall?.toName}...`}
-            {callState === 'ringing' && `Ringing ${currentCall?.toName}...`}
-            {callState === 'connecting' && 'Connecting...'}
-          </p>
-          <button className="cancel-btn" onClick={cancelCall}>
-            Cancel
+        <div className="call-screen">
+          <div className="call-screen-header">
+            <span className="call-screen-status">
+              {callState === 'calling' && '📞 Calling...'}
+              {callState === 'ringing' && '🔔 Ringing...'}
+              {callState === 'connecting' && '🔗 Connecting...'}
+            </span>
+          </div>
+          
+          <div className="call-screen-avatar">
+            {currentCall?.toName.charAt(0).toUpperCase()}
+          </div>
+          
+          <div className="call-screen-name">
+            {currentCall?.toName}
+          </div>
+          
+          <button className="call-screen-cancel" onClick={cancelCall}>
+            ✕ Cancel
           </button>
         </div>
       )}
 
       {callState === 'connected' && currentCall && (
-        <div className="active-call">
-          <div className="call-avatar">
+        <div className="call-screen">
+          <div className="call-screen-header">
+            <span className="call-screen-status call-active">
+              ● Active Call
+            </span>
+          </div>
+          
+          <div className="call-screen-avatar">
             {currentCall.toName.charAt(0).toUpperCase()}
           </div>
-          <div className="caller-name">{currentCall.toName}</div>
-          <div className="call-status">● Connected</div>
-          <div className="call-timer">{formatTime(callTimer)}</div>
-          <button className="end-call-btn" onClick={endCall}>
-            End Call
-          </button>
+          
+          <div className="call-screen-name">
+            {currentCall.toName}
+          </div>
+          
+          <div className="call-screen-timer">
+            {formatTime(callTimer)}
+          </div>
+          
+          <div className="call-screen-controls">
+            <button className="call-screen-hangup" onClick={endCall}>
+              <span className="hangup-icon">📵</span>
+              <span>Hang Up</span>
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Users List */}
-      <div className="users-section">
+      {/* Users List - hidden during active call */}
+      {callState === 'idle' && (
         <h3>
           {users.length > 0 ? `Online Users (${users.length})` : 'No Users Online'}
         </h3>
@@ -459,6 +484,7 @@ function App() {
           </div>
         )}
       </div>
+      )}
 
       {/* Incoming Call Modal */}
       {incomingCall && (

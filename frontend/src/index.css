@@ -358,7 +358,131 @@ body {
   transform: scale(1.05);
 }
 
-/* Active Call UI */
+/* Active Call Screen (Full Screen) */
+.call-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.call-screen-header {
+  position: absolute;
+  top: 50px;
+  left: 0;
+  right: 0;
+  text-align: center;
+}
+
+.call-screen-status {
+  font-size: 0.95rem;
+  color: #8892b0;
+  letter-spacing: 1px;
+}
+
+.call-screen-status.call-active {
+  color: #4ade80;
+}
+
+.call-screen-avatar {
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #533483, #e94560);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3.5rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 25px;
+  box-shadow: 0 10px 40px rgba(233, 69, 96, 0.3);
+}
+
+.call-screen-name {
+  font-size: 1.8rem;
+  font-weight: 600;
+  color: #ccd6f6;
+  margin-bottom: 10px;
+}
+
+.call-screen-timer {
+  font-size: 2.5rem;
+  font-weight: 300;
+  color: #e94560;
+  margin-bottom: 50px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 2px;
+}
+
+.call-screen-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+}
+
+.call-screen-cancel {
+  margin-top: 40px;
+  padding: 12px 30px;
+  background: transparent;
+  border: 2px solid #8892b0;
+  color: #8892b0;
+  border-radius: 50px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.call-screen-cancel:hover {
+  border-color: #e94560;
+  color: #e94560;
+}
+
+.call-screen-hangup {
+  padding: 18px 50px;
+  background: linear-gradient(135deg, #e94560, #c23152);
+  border: none;
+  border-radius: 50px;
+  color: #fff;
+  font-size: 1.2rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 8px 30px rgba(233, 69, 96, 0.4);
+}
+
+.call-screen-hangup:hover {
+  transform: scale(1.05);
+  box-shadow: 0 12px 40px rgba(233, 69, 96, 0.5);
+}
+
+.call-screen-hangup:active {
+  transform: scale(0.98);
+}
+
+.hangup-icon {
+  font-size: 1.4rem;
+}
+
+/* Old Active Call - kept for reference, no longer used */
 .active-call {
   background: #1e2a45;
   border: 1px solid #233554;
