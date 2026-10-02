@@ -17,7 +17,8 @@ const io = new Server(server, {
     origin: (origin, callback) => callback(null, true),
     methods: ['GET', 'POST']
   },
-  path: '/socket.io/'
+  path: '/socket.io/',
+  transports: ['polling']
 });
 
 // Store connected users

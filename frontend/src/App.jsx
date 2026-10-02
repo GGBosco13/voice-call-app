@@ -22,7 +22,7 @@ function App() {
   // Initialize socket connection
   useEffect(() => {
     const socket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling'],
       path: '/socket.io/',
     });
     socketRef.current = socket;
