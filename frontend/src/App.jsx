@@ -444,12 +444,13 @@ function App() {
 
       {/* Users List - hidden during active call */}
       {callState === 'idle' && (
-        <h3>
-          {users.length > 0 ? `Online Users (${users.length})` : 'No Users Online'}
-        </h3>
-        
-        {users.length > 0 ? (
-          <div className="users-list">
+        <div className="users-section">
+          <h3>
+            {users.length > 0 ? `Online Users (${users.length})` : 'No Users Online'}
+          </h3>
+          
+          {users.length > 0 ? (
+            <div className="users-list">
             {users.map((user) => (
               <div key={user.id} className="user-card">
                 <div className="user-details">
@@ -483,7 +484,7 @@ function App() {
             </p>
           </div>
         )}
-      </div>
+        </div>
       )}
 
       {/* Incoming Call Modal */}
