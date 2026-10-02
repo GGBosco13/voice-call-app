@@ -454,21 +454,9 @@ function App() {
         }
       };
 
-      // Get the offer and pending ICE from the room
+      // Get the offer from the room
       const res = await fetch(`${API_URL}/api/rooms/${callId}`);
       const room = await res.json();
-
-      // Pre-add any pending ICE candidates from the caller
-      if (room.iceCandidates) {
-        for (const ice of room.iceCandidates) {
-          const candidateObj = ice.candidate || ice;
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(candidateObj));
-          } catch (e) {
-            console.warn('Failed to add pre-fetched ICE candidate:', e);
-          }
-        }
-      }
 
       await pc.setRemoteDescription(new RTCSessionDescription({
         type: 'offer',
