@@ -85,16 +85,15 @@ function App() {
         if (room.iceCandidates && peerConnectionRef.current) {
           if (!peerConnectionRef.current._addedIce) peerConnectionRef.current._addedIce = new Set();
           for (const ice of room.iceCandidates) {
-            const candidateObj = ice.candidate || ice;
-            const key = typeof candidateObj === 'string' 
-              ? candidateObj 
-              : JSON.stringify({ candidate: candidateObj.candidate, sdpMid: candidateObj.sdpMid, sdpMLineIndex: candidateObj.sdpMLineIndex });
+            // ice is already the full RTCIceCandidateInit object from the server
+            const candidateObj = ice;
+            const key = JSON.stringify(candidateObj);
             if (!peerConnectionRef.current._addedIce.has(key)) {
               peerConnectionRef.current._addedIce.add(key);
               try {
                 await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidateObj));
               } catch (e) {
-                console.warn('Failed to add ICE candidate:', e);
+                console.warn('Failed to add ICE candidate:', e, 'obj:', candidateObj);
               }
             }
           }

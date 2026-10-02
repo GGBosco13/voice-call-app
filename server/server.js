@@ -82,7 +82,7 @@ app.post('/api/rooms/:callId/ice', (req, res) => {
   }
   const room = rooms.get(callId);
   room.iceCandidates = room.iceCandidates || [];
-  room.iceCandidates.push(candidate);
+  room.iceCandidates.push({ ...candidate });
   res.json({ status: 'received' });
 });
 
