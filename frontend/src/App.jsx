@@ -18,6 +18,18 @@ function App() {
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
   const callTimerRef = useRef(null);
+  const myIdRef = useRef(null);
+  const myNameRef = useRef('');
+
+  // Register user when name changes and socket is connected
+  useEffect(() => {
+    myNameRef.current = myName;
+  }, [myName]);
+
+  // Set myId ref when it changes
+  useEffect(() => {
+    myIdRef.current = myId;
+  }, [myId]);
 
   // Initialize socket connection
   useEffect(() => {
@@ -28,25 +40,21 @@ function App() {
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('CONNECTED', socket.id, SOCKET_URL);
-      if (myName) {
-        socket.emit('register', myName);
-        console.log('Registered as:', myName);
+      if (myNameRef.current) {
+        socket.emit('register', myNameRef.current);
       }
     });
 
     socket.on('disconnect', (reason) => {
-      console.log('DISCONNECTED', reason);
+      // connection lost
     });
 
     socket.on('connect_error', (err) => {
-      console.error('CONNECT ERROR', err.message);
+      console.error('Socket connection error:', err.message);
     });
 
     socket.on('user-list', (usersList) => {
-      console.log('USER LIST raw:', JSON.stringify(usersList));
-      const filtered = usersList.filter(u => u.id !== myId);
-      console.log('USER LIST filtered (shown):', JSON.stringify(filtered));
+      const filtered = usersList.filter(u => u.id !== myIdRef.current);
       setUsers(filtered);
     });
 
