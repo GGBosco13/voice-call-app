@@ -50,7 +50,7 @@ function App() {
     });
 
     socket.on('connect_error', (err) => {
-      console.error('Socket connection error:', err.message);
+      console.error('Socket connection error:', err.message, err.description);
     });
 
     socket.on('user-list', (usersList) => {

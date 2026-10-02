@@ -14,11 +14,12 @@ app.use(cors({
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: (origin, callback) => callback(null, true),
+    origin: true,
     methods: ['GET', 'POST']
   },
   path: '/socket.io/',
-  transports: ['polling']
+  transports: ['polling'],
+  allowEIO3: true
 });
 
 // Store connected users
@@ -27,11 +28,28 @@ let nextId = 1;
 
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
+  console.log(`  Transport: ${socket.conn.transport.name}`);
+  console.log(`  Client IP: ${socket.handshake.headers['x-forwarded-for'] || socket.handshake.address}`);
 
   socket.on('register', (name) => {
     const userId = nextId++;
     users.set(socket.id, { id: userId, name });
+    console.log(`  Registered: ${name} as user ${userId}`);
     broadcastUserList();
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log(`Client disconnected: ${socket.id}, reason: ${reason}`);
+    const user = users.get(socket.id);
+    if (user) {
+      users.delete(socket.id);
+      broadcastUserList();
+      io.emit('user-disconnected', { userId: user.id });
+    }
+  });
+
+  socket.on('error', (err) => {
+    console.error(`Socket error for ${socket.id}:`, err.message);
   });
 
   socket.on('call-user', ({ to, from, fromName }) => {
@@ -89,16 +107,6 @@ io.on('connection', (socket) => {
       .find(([socketId, user]) => user.id === to)?.[0];
     if (targetSocket) {
       io.to(targetSocket).emit('receive-ice', { from: socket.id, iceCandidate, callId });
-    }
-  });
-
-  socket.on('disconnect', () => {
-    const user = users.get(socket.id);
-    if (user) {
-      console.log(`${user.name} disconnected`);
-      users.delete(socket.id);
-      broadcastUserList();
-      io.emit('user-disconnected', { userId: user.id });
     }
   });
 });
