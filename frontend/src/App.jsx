@@ -133,10 +133,9 @@ function App() {
     try {
       console.log('Requesting microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      console.log('Microphone access granted');
+      console.log('Microphone access granted, tracks:', stream.getTracks().length);
       localStreamRef.current = stream;
 
-      // Shared call ID: both caller and receiver know the IDs, so they can derive it
       const callId = `${Math.min(myId, targetUserId)}-${Math.max(myId, targetUserId)}`;
       setCallState('calling');
       setCurrentCall({ to: targetUserId, toName: targetUserName, callId, isOutgoing: true });
@@ -149,6 +148,7 @@ function App() {
           { urls: 'stun:stun3.l.google.com:19302' },
           { urls: 'stun:stun4.l.google.com:19302' },
           { urls: 'stun:stun.cloudflare.com:3478' },
+          { urls: 'stun:global.stun.twilio.com:3478?transport=udp' },
           {
             urls: 'turn:openrelay.metered.ca:443',
             username: 'openrelayproject',
@@ -175,8 +175,10 @@ function App() {
 
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
+      // ICE candidates: send each one as it's gathered
       pc.onicecandidate = (event) => {
         if (event.candidate) {
+          console.log('Caller: ICE candidate gathered, sending to server');
           fetch(`${API_URL}/api/rooms/${callId}/ice`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -187,54 +189,59 @@ function App() {
         }
       };
 
+      // Receive remote audio track
       pc.ontrack = (event) => {
-        console.log('ontrack received, stream:', event.streams[0]?.id, 'tracks:', event.streams[0]?.getTracks().length);
-        // Remove any previous remote audio
+        console.log('Caller: ontrack received, remote tracks:', event.streams[0]?.getTracks().length);
         if (peerConnectionRef.current._remoteAudio) {
           try { peerConnectionRef.current._remoteAudio.pause(); } catch {}
           try { peerConnectionRef.current._remoteAudio.remove(); } catch {}
         }
         const audio = document.createElement('audio');
-        audio.id = 'remote-audio';
         audio.autoplay = true;
         audio.playsInline = true;
-        audio.muted = false;
         audio.srcObject = event.streams[0];
         audio.play().then(() => {
-          console.log('Remote audio playing successfully');
-        }).catch((playErr) => {
-          console.warn('Autoplay blocked, will play on interaction:', playErr);
-          // Try playing on first user interaction
-          const tryPlay = () => {
-            audio.play().catch(() => {});
-            document.removeEventListener('click', tryPlay);
-            document.removeEventListener('touchstart', tryPlay);
-          };
-          document.addEventListener('click', tryPlay, { once: true });
-          document.addEventListener('touchstart', tryPlay, { once: true });
+          console.log('Caller: remote audio playing');
+        }).catch((e) => {
+          console.warn('Caller: autoplay blocked:', e);
         });
-        // Append to body so audio element exists in DOM
         document.body.appendChild(audio);
         peerConnectionRef.current._remoteAudio = audio;
       };
 
       pc.onconnectionstatechange = () => {
-        const state = pc.connectionState;
-        const iceState = pc.iceConnectionState;
-        console.log('Caller connection state:', state, 'ICE:', iceState);
-        if (state === 'connected') {
+        console.log('Caller: connectionState=', pc.connectionState, 'ice=', pc.iceConnectionState);
+        if (pc.connectionState === 'connected') {
           setCallState('connected');
           startCallTimer();
-        } else if (state === 'disconnected' || state === 'failed' || iceState === 'failed') {
-          console.log('Caller call failed, ending...');
+        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.iceConnectionState === 'failed') {
+          console.log('Caller: call failed, ending');
           endCall();
         }
       };
 
+      // Create offer and wait for ICE gathering to complete (includes TURN candidates in SDP)
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      await new Promise(resolve => setTimeout(resolve, 500));
+      console.log('Caller: waiting for ICE gathering...');
 
+      await new Promise((resolve) => {
+        const checkDone = () => {
+          if (pc.iceGatheringState === 'complete') {
+            console.log('Caller: ICE gathering complete!');
+            resolve();
+          }
+        };
+        const interval = setInterval(checkDone, 100);
+        setTimeout(() => {
+          clearInterval(interval);
+          console.log('Caller: ICE gathering timeout, sending anyway');
+          resolve();
+        }, 8000);
+        checkDone();
+      });
+
+      console.log('Caller: sending offer with full ICE info');
       await fetch(`${API_URL}/api/rooms/${callId}/offer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -406,6 +413,7 @@ function App() {
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
+          console.log('Callee: ICE candidate gathered, sending to server');
           fetch(`${API_URL}/api/rooms/${callId}/ice`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -415,32 +423,20 @@ function App() {
       };
 
       pc.ontrack = (event) => {
-        console.log('ontrack received, stream:', event.streams[0]?.id, 'tracks:', event.streams[0]?.getTracks().length);
-        // Remove any previous remote audio
+        console.log('Callee: ontrack received, remote tracks:', event.streams[0]?.getTracks().length);
         if (peerConnectionRef.current._remoteAudio) {
           try { peerConnectionRef.current._remoteAudio.pause(); } catch {}
           try { peerConnectionRef.current._remoteAudio.remove(); } catch {}
         }
         const audio = document.createElement('audio');
-        audio.id = 'remote-audio';
         audio.autoplay = true;
         audio.playsInline = true;
-        audio.muted = false;
         audio.srcObject = event.streams[0];
         audio.play().then(() => {
-          console.log('Remote audio playing successfully');
-        }).catch((playErr) => {
-          console.warn('Autoplay blocked, will play on interaction:', playErr);
-          // Try playing on first user interaction
-          const tryPlay = () => {
-            audio.play().catch(() => {});
-            document.removeEventListener('click', tryPlay);
-            document.removeEventListener('touchstart', tryPlay);
-          };
-          document.addEventListener('click', tryPlay, { once: true });
-          document.addEventListener('touchstart', tryPlay, { once: true });
+          console.log('Callee: remote audio playing');
+        }).catch((e) => {
+          console.warn('Callee: autoplay blocked:', e);
         });
-        // Append to body so audio element exists in DOM
         document.body.appendChild(audio);
         peerConnectionRef.current._remoteAudio = audio;
       };
@@ -448,12 +444,12 @@ function App() {
       pc.onconnectionstatechange = () => {
         const state = pc.connectionState;
         const iceState = pc.iceConnectionState;
-        console.log('Callee connection state:', state, 'ICE:', iceState);
+        console.log('Callee: connectionState=', state, 'ice=', iceState);
         if (state === 'connected') {
           setCallState('connected');
           startCallTimer();
         } else if (state === 'disconnected' || state === 'failed' || iceState === 'failed') {
-          console.log('Callee call failed, ending...');
+          console.log('Callee: call failed, ending');
           endCall();
         }
       };
@@ -462,13 +458,15 @@ function App() {
       const res = await fetch(`${API_URL}/api/rooms/${callId}`);
       const room = await res.json();
 
-      // Pre-add any pending ICE candidates
+      // Pre-add any pending ICE candidates from the caller
       if (room.iceCandidates) {
         for (const ice of room.iceCandidates) {
           const candidateObj = ice.candidate || ice;
           try {
             await pc.addIceCandidate(new RTCIceCandidate(candidateObj));
-          } catch {}
+          } catch (e) {
+            console.warn('Failed to add pre-fetched ICE candidate:', e);
+          }
         }
       }
 
@@ -479,15 +477,32 @@ function App() {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
+      // Wait for ICE gathering before sending the answer (so TURN candidates are included in SDP)
+      console.log('Callee: waiting for ICE gathering...');
+      await new Promise((resolve) => {
+        const checkDone = () => {
+          if (pc.iceGatheringState === 'complete') {
+            console.log('Callee: ICE gathering complete!');
+            resolve();
+          }
+        };
+        const interval = setInterval(checkDone, 100);
+        setTimeout(() => {
+          clearInterval(interval);
+          console.log('Callee: ICE gathering timeout, sending anyway');
+          resolve();
+        }, 8000);
+        checkDone();
+      });
+
+      console.log('Callee: sending answer with full ICE info');
       await fetch(`${API_URL}/api/rooms/${callId}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ callId, answer: pc.localDescription, from: myId, to: fromUserId })
       }).catch(() => {});
 
-      setCallState('connected');
       setCurrentCall({ to: fromUserId, toName: fromUserName, callId, isOutgoing: false });
-      startCallTimer();
       setIncomingCall(null);
 
     } catch (err) {
