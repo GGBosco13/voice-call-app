@@ -37,12 +37,16 @@ app.get('/api/rooms/:callId', (req, res) => {
 
 app.post('/api/rooms/:callId/offer', (req, res) => {
   const { callId, offer, from, to } = req.body;
-  const room = rooms.get(callId);
-  if (!room) return res.status(404).json({ error: 'Not found' });
-  room.from = from;
-  room.to = to;
-  room.offer = offer;
-  room.state = 'offered';
+  // Create room if it doesn't exist
+  if (!rooms.has(callId)) {
+    rooms.set(callId, { from, to, state: 'offered', offer });
+  } else {
+    const room = rooms.get(callId);
+    room.from = from;
+    room.to = to;
+    room.offer = offer;
+    room.state = 'offered';
+  }
   console.log(`Offer sent from ${from} to ${to} for room ${callId}`);
   res.json({ status: 'sent' });
 });
@@ -60,20 +64,26 @@ app.get('/api/rooms/:callId/waiting', (req, res) => {
 
 app.post('/api/rooms/:callId/answer', (req, res) => {
   const { callId, answer, from, to } = req.body;
-  const room = rooms.get(callId);
-  if (!room) return res.status(404).json({ error: 'Not found' });
-  room.answer = answer;
-  room.state = 'answered';
+  if (!rooms.has(callId)) {
+    rooms.set(callId, { from, to, state: 'answered', answer });
+  } else {
+    const room = rooms.get(callId);
+    room.answer = answer;
+    room.state = 'answered';
+  }
   console.log(`Call answered for room ${callId}`);
   res.json({ status: 'answered' });
 });
 
 app.post('/api/rooms/:callId/ice', (req, res) => {
   const { callId, candidate, from, to } = req.body;
-  const room = rooms.get(callId);
-  if (!room) return res.status(404).json({ error: 'Not found' });
-  room.iceCandidates = room.iceCandidates || [];
-  room.iceCandidates.push({ candidate, from });
+  if (!rooms.has(callId)) {
+    rooms.set(callId, { from, to, state: 'connecting', iceCandidates: [{ candidate, from }] });
+  } else {
+    const room = rooms.get(callId);
+    room.iceCandidates = room.iceCandidates || [];
+    room.iceCandidates.push({ candidate, from });
+  }
   res.json({ status: 'received' });
 });
 
