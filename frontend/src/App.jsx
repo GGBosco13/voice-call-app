@@ -19,41 +19,35 @@ function App() {
   const localStreamRef = useRef(null);
   const callTimerRef = useRef(null);
 
-  // Register user when name changes and socket is connected
-  useEffect(() => {
-    if (myName && socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit('register', myName);
-    }
-  }, [myName]);
-
   // Initialize socket connection
   useEffect(() => {
     const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
       path: '/socket.io/',
     });
-    console.log('Connecting to:', SOCKET_URL);
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('Socket connected, ID:', socket.id);
-      // Register if we already have a name (will also be caught by the effect above)
+      console.log('CONNECTED', socket.id, SOCKET_URL);
       if (myName) {
         socket.emit('register', myName);
+        console.log('Registered as:', myName);
       }
     });
 
-    socket.on('disconnect', () => {
-      console.log('Socket disconnected');
+    socket.on('disconnect', (reason) => {
+      console.log('DISCONNECTED', reason);
     });
 
     socket.on('connect_error', (err) => {
-      console.error('Socket connect error:', err.message);
+      console.error('CONNECT ERROR', err.message);
     });
 
     socket.on('user-list', (usersList) => {
-      console.log('User list received:', usersList);
-      setUsers(usersList.filter(u => u.id !== myId));
+      console.log('USER LIST raw:', JSON.stringify(usersList));
+      const filtered = usersList.filter(u => u.id !== myId);
+      console.log('USER LIST filtered (shown):', JSON.stringify(filtered));
+      setUsers(filtered);
     });
 
     socket.on('incoming-call', (data) => {
