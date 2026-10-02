@@ -12,7 +12,8 @@ const io = new Server(server, {
   cors: {
     origin: "*",
     methods: ['GET', 'POST']
-  }
+  },
+  path: '/socket.io/'
 });
 
 // Store connected users
@@ -106,8 +107,8 @@ function broadcastUserList() {
 const distPath = path.join(__dirname, '..', 'frontend', 'dist');
 app.use(express.static(distPath));
 
-// Handle SPA routing
-app.get('*', (req, res) => {
+// SPA routing - only catch routes that aren't socket.io paths
+app.get(/^((?!(\/socket\.io\/)).)*$/, (req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
