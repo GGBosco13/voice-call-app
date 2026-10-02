@@ -15,7 +15,6 @@ function App() {
 
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
-  const remoteAudioRef = useRef(null);
   const callTimerRef = useRef(null);
   const pollingRef = useRef(null);
   const checkCallIntervalRef = useRef(null);
@@ -179,10 +178,12 @@ function App() {
       };
 
       pc.ontrack = (event) => {
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = event.streams[0];
-          remoteAudioRef.current.play().catch(() => {});
-        }
+        const audio = document.createElement('audio');
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.srcObject = event.streams[0];
+        audio.play().catch(() => {});
+        peerConnectionRef.current._remoteAudio = audio;
       };
 
       pc.onconnectionstatechange = () => {
@@ -361,10 +362,12 @@ function App() {
       };
 
       pc.ontrack = (event) => {
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = event.streams[0];
-          remoteAudioRef.current.play().catch(() => {});
-        }
+        const audio = document.createElement('audio');
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.srcObject = event.streams[0];
+        audio.play().catch(() => {});
+        peerConnectionRef.current._remoteAudio = audio;
       };
 
       pc.onconnectionstatechange = () => {
@@ -462,6 +465,10 @@ function App() {
       callTimerRef.current = null;
     }
     if (peerConnectionRef.current) {
+      if (peerConnectionRef.current._remoteAudio) {
+        peerConnectionRef.current._remoteAudio.pause();
+        peerConnectionRef.current._remoteAudio.srcObject = null;
+      }
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
@@ -541,7 +548,6 @@ function App() {
   // Main App
   return (
     <div className="app">
-      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
       {/* Header */}
       <div className="header">
         <h2>📞 Voice Call</h2>
