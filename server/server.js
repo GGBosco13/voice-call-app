@@ -20,11 +20,27 @@ app.use((req, res, next) => {
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: false,
   path: '/socket.io/',
   transports: ['polling'],
   allowEIO3: true
 });
+
+// Ensure CORS headers are present on socket.io responses
+const originalEmit = io.engine.emit.bind(io.engine);
+io.engine.emit = function(evt, ...args) {
+  if (evt === 'response') {
+    // The response packet, add CORS headers
+    const res = args[1];
+    if (res && res.setHeader) {
+      const origin = res.req && res.req.headers && res.req.headers.origin;
+      if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
+      }
+    }
+  }
+  return originalEmit(evt, ...args);
+};
 
 // Store connected users
 const users = new Map(); // socketId -> { id, name }
