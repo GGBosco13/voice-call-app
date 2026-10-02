@@ -1,8 +1,10 @@
-{
-  "builds": [
-    {
-      "src": "server/server.js",
-      "use": "@renderless/build"
-    }
-  ]
-}
+services:
+  - type: web
+    name: voice-call-app
+    repo: https://github.com/GGBosco13/voice-call-app
+    plan: free
+    region: oregon
+    buildCommand: cd frontend && npm install && npx vite build && cd ../server && npm install
+    startCommand: cd server && node server.js
+    env: node
+    rootDir: .
