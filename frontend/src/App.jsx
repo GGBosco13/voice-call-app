@@ -259,7 +259,10 @@ function App() {
         if (room.state === 'answered' && room.answer) {
           const pc = peerConnectionRef.current;
           if (pc) {
-            await pc.setRemoteDescription(new RTCSessionDescription(room.answer));
+            await pc.setRemoteDescription(new RTCSessionDescription({
+              type: 'answer',
+              sdp: room.answer.sdp || room.answer
+            }));
             setCallState('connected');
             startCallTimer();
           }
@@ -348,7 +351,10 @@ function App() {
         }
       }
 
-      await pc.setRemoteDescription(new RTCSessionDescription(room.offer));
+      await pc.setRemoteDescription(new RTCSessionDescription({
+        type: 'offer',
+        sdp: room.offer.sdp || room.offer
+      }));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
