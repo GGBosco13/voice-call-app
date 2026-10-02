@@ -57,13 +57,15 @@ function App() {
           try {
             const roomRes = await fetch(`${API_URL}/api/rooms/${callId}`);
             const room = await roomRes.json();
-            if (room.state === 'offered' && room.from === user.id) {
+            // Check for offers from this user OR any offered state (even if fromName doesn't match)
+            if (room.state === 'offered' && (room.from === user.id || room.fromName)) {
+              console.log('=== Incoming call detected:', room.fromName || user.name, 'from user', room.from);
               setIncomingCall({
                 callId,
-                fromId: user.id,
+                fromId: room.from || user.id,
                 fromName: room.fromName || user.name
               });
-              showToast(`${user.name} is calling`, 'success');
+              showToast(`${room.fromName || user.name} is calling`, 'success');
               break;
             }
           } catch {}
@@ -353,7 +355,8 @@ function App() {
   // Answer an incoming call
   async function acceptCall(callId, fromUserId, fromUserName) {
     try {
-      console.log('=== acceptCall: Requesting microphone...');
+      console.log('=== acceptCall STARTED: callId=', callId, 'from=', fromUserId, 'name=', fromUserName);
+      console.log('=== acceptCall: Current callState before =', callState, 'currentCall =', currentCall);
       let stream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -455,17 +458,21 @@ function App() {
       });
 
       console.log('=== acceptCall: Sending answer to server');
-      await fetch(`${API_URL}/api/rooms/${callId}/answer`, {
+      const answerRes = await fetch(`${API_URL}/api/rooms/${callId}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ callId, answer: pc.localDescription, from: myId, to: fromUserId })
-      }).catch(() => {});
+      });
+      const answerResult = await answerRes.json();
+      console.log('=== acceptCall: Answer sent, result:', answerResult);
 
       setCurrentCall({ to: fromUserId, toName: fromUserName, callId, isOutgoing: false });
       setIncomingCall(null);
 
     } catch (err) {
-      console.error('Error answering call:', err);
+      console.error('=== acceptCall ERROR:', err);
+      console.error('=== acceptCall error stack:', err.stack);
+      showToast('Error answering call: ' + err.message, 'error');
       setIncomingCall(null);
     }
   }
