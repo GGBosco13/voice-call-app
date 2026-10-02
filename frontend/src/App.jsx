@@ -15,6 +15,7 @@ function App() {
 
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteAudioRef = useRef(null);
   const callTimerRef = useRef(null);
   const pollingRef = useRef(null);
   const checkCallIntervalRef = useRef(null);
@@ -82,14 +83,16 @@ function App() {
         const res = await fetch(`${API_URL}/api/rooms/${currentCall.callId}`);
         const room = await res.json();
         if (room.iceCandidates && peerConnectionRef.current) {
-          // Track which candidates we've already added
+          if (!peerConnectionRef.current._addedIce) peerConnectionRef.current._addedIce = new Set();
           for (const ice of room.iceCandidates) {
-            if (!peerConnectionRef.current._addedIce) peerConnectionRef.current._addedIce = new Set();
-            const key = JSON.stringify(ice);
+            const candidateObj = ice.candidate || ice;
+            const key = typeof candidateObj === 'string' 
+              ? candidateObj 
+              : JSON.stringify({ candidate: candidateObj.candidate, sdpMid: candidateObj.sdpMid, sdpMLineIndex: candidateObj.sdpMLineIndex });
             if (!peerConnectionRef.current._addedIce.has(key)) {
               peerConnectionRef.current._addedIce.add(key);
               try {
-                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(ice));
+                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidateObj));
               } catch {}
             }
           }
@@ -162,6 +165,34 @@ function App() {
       peerConnectionRef.current = pc;
 
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          fetch(`${API_URL}/api/rooms/${callId}/ice`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              callId, candidate: event.candidate, from: myId, to: targetUserId
+            })
+          }).catch(() => {});
+        }
+      };
+
+      pc.ontrack = (event) => {
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = event.streams[0];
+          remoteAudioRef.current.play().catch(() => {});
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+          setCallState('connected');
+          startCallTimer();
+        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+          endCall();
+        }
+      };
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -329,6 +360,13 @@ function App() {
         }
       };
 
+      pc.ontrack = (event) => {
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = event.streams[0];
+          remoteAudioRef.current.play().catch(() => {});
+        }
+      };
+
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'connected') {
           setCallState('connected');
@@ -345,8 +383,9 @@ function App() {
       // Pre-add any pending ICE candidates
       if (room.iceCandidates) {
         for (const ice of room.iceCandidates) {
+          const candidateObj = ice.candidate || ice;
           try {
-            await pc.addIceCandidate(new RTCIceCandidate(ice));
+            await pc.addIceCandidate(new RTCIceCandidate(candidateObj));
           } catch {}
         }
       }
@@ -502,6 +541,7 @@ function App() {
   // Main App
   return (
     <div className="app">
+      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
       {/* Header */}
       <div className="header">
         <h2>📞 Voice Call</h2>
