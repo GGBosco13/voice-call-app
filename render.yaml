@@ -1,0 +1,8 @@
+{
+  "builds": [
+    {
+      "src": "server/server.js",
+      "use": "@renderless/build"
+    }
+  ]
+}
