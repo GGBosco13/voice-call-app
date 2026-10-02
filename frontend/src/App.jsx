@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 
-const SOCKET_URL = process.env.VITE_SOCKET_URL || 'http://localhost:3001';
+const SOCKET_URL = window.location.origin;
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
