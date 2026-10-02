@@ -74,38 +74,41 @@ function App() {
     return () => clearInterval(checkCallIntervalRef.current);
   }, [myId]);
 
-  // Poll for ICE candidates during an active call
+  // Poll for ICE candidates for BOTH sides during a call
   useEffect(() => {
-    if (!currentCall) return;
+    if (!currentCall || !peerConnectionRef.current) return;
 
     const pollICE = async () => {
       try {
         const res = await fetch(`${API_URL}/api/rooms/${currentCall.callId}`);
         const room = await res.json();
         if (room.iceCandidates && peerConnectionRef.current) {
-          if (!peerConnectionRef.current._addedIce) peerConnectionRef.current._addedIce = new Set();
-          for (const ice of room.iceCandidates) {
-            // ice is already the full RTCIceCandidateInit object from the server
-            const candidateObj = ice;
-            const key = JSON.stringify(candidateObj);
-            if (!peerConnectionRef.current._addedIce.has(key)) {
-              peerConnectionRef.current._addedIce.add(key);
-              try {
-                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidateObj));
-              } catch (e) {
-                console.warn('Failed to add ICE candidate:', e, 'obj:', candidateObj);
+          // Only add candidates if remote description is set (pc.setRemoteDescription was called)
+          // Check by seeing if peerConnection has signalingState set
+          if (peerConnectionRef.current.remoteDescription) {
+            if (!peerConnectionRef.current._addedIce) peerConnectionRef.current._addedIce = new Set();
+            for (const ice of room.iceCandidates) {
+              const candidateObj = ice;
+              const key = JSON.stringify(candidateObj);
+              if (!peerConnectionRef.current._addedIce.has(key)) {
+                peerConnectionRef.current._addedIce.add(key);
+                try {
+                  await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidateObj));
+                } catch (e) {
+                  console.warn('Failed to add ICE candidate:', e);
+                }
               }
             }
           }
         }
       } catch (e) {
-        console.warn('ICE poll failed:', e);
+        // Silently ignore fetch errors
       }
     };
-    const interval = setInterval(pollICE, 1000);
+    const interval = setInterval(pollICE, 500);
     pollICE();
     return () => clearInterval(interval);
-  }, [currentCall?.callId, callState, myId]);
+  }, [currentCall?.callId, myId]);
 
   function handleLogin(e) {
     e.preventDefault();
