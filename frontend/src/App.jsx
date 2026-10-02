@@ -40,7 +40,7 @@ function App() {
     return () => clearInterval(interval);
   }, [myId]);
 
-  // Poll for incoming calls
+  // Poll for incoming calls and ICE candidates
   useEffect(() => {
     if (!myId) return;
 
@@ -72,6 +72,30 @@ function App() {
     checkCallIntervalRef.current = setInterval(checkIncoming, 3000);
     return () => clearInterval(checkCallIntervalRef.current);
   }, [myId]);
+
+  // Poll for ICE candidates during an active call
+  useEffect(() => {
+    if (!currentCall || callState !== 'connected') return;
+
+    const pollICE = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/rooms/${currentCall.callId}`);
+        const room = await res.json();
+        if (room.iceCandidates) {
+          for (const ice of room.iceCandidates) {
+            if (ice.from !== myId && peerConnectionRef.current) {
+              try {
+                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(ice.candidate));
+              } catch {}
+            }
+          }
+        }
+      } catch {}
+    };
+    const interval = setInterval(pollICE, 2000);
+    pollICE();
+    return () => clearInterval(interval);
+  }, [currentCall?.callId, callState, myId]);
 
   function handleLogin(e) {
     e.preventDefault();
