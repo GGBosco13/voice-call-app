@@ -81,18 +81,20 @@ function App() {
       try {
         const res = await fetch(`${API_URL}/api/rooms/${currentCall.callId}`);
         const room = await res.json();
-        if (room.iceCandidates) {
-          for (const ice of room.iceCandidates) {
-            if (ice.from !== myId && peerConnectionRef.current) {
+        // Get candidates meant for us (the other person sent them)
+        const candidates = room.candidatesFor && room.candidatesFor[myId];
+        if (candidates) {
+          for (const ice of candidates) {
+            if (peerConnectionRef.current) {
               try {
-                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(ice.candidate));
+                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(ice));
               } catch {}
             }
           }
         }
       } catch {}
     };
-    const interval = setInterval(pollICE, 2000);
+    const interval = setInterval(pollICE, 1000);
     pollICE();
     return () => clearInterval(interval);
   }, [currentCall?.callId, callState, myId]);
@@ -223,12 +225,18 @@ function App() {
       const pc = createPeerConnection();
       peerConnectionRef.current = pc;
 
-      setCallState('connected');
-      setCurrentCall({ to: fromUserId, toName: fromUserName, callId, isOutgoing: false });
-
-      // Get the offer from the room
+      // Get the offer and pending ICE candidates from the room
       const res = await fetch(`${API_URL}/api/rooms/${callId}`);
       const room = await res.json();
+
+      // Pre-add any pending ICE candidates before setting the remote description
+      if (room.candidatesFor && room.candidatesFrom) {
+        for (const ice of room.candidatesFrom) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(ice));
+          } catch {}
+        }
+      }
 
       await pc.setRemoteDescription(new RTCSessionDescription(room.offer));
       const answer = await pc.createAnswer();
@@ -242,6 +250,8 @@ function App() {
         })
       }).catch(() => {});
 
+      setCallState('connected');
+      setCurrentCall({ to: fromUserId, toName: fromUserName, callId, isOutgoing: false });
       startCallTimer();
       setIncomingCall(null);
 

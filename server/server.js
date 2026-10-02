@@ -78,12 +78,15 @@ app.post('/api/rooms/:callId/answer', (req, res) => {
 app.post('/api/rooms/:callId/ice', (req, res) => {
   const { callId, candidate, from, to } = req.body;
   if (!rooms.has(callId)) {
-    rooms.set(callId, { from, to, state: 'connecting', iceCandidates: [{ candidate, from }] });
-  } else {
-    const room = rooms.get(callId);
-    room.iceCandidates = room.iceCandidates || [];
-    room.iceCandidates.push({ candidate, from });
+    rooms.set(callId, { from, to, state: 'connecting' });
   }
+  const room = rooms.get(callId);
+  room.iceCandidates = room.iceCandidates || [];
+  room.iceCandidates.push({ candidate, from });
+  // Store separate lists for each direction
+  if (!room.candidatesFor) room.candidatesFor = {};
+  if (!room.candidatesFor[to]) room.candidatesFor[to] = [];
+  room.candidatesFor[to].push({ candidate, from });
   res.json({ status: 'received' });
 });
 
