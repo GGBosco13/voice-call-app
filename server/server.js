@@ -5,8 +5,9 @@ const path = require('path');
 const app = express();
 app.use(express.json());
 
-// Simple in-memory store
-const rooms = new Map(); // callId -> { from, to, state, signaling }
+// Separate stores for users and rooms
+const usersMap = new Map(); // socketId -> { userId, name }
+const rooms = new Map(); // callId -> { from, to, fromName, state, signaling }
 
 // Generate ID
 let nextId = 1;
@@ -15,14 +16,13 @@ let nextId = 1;
 app.post('/api/register', (req, res) => {
   const { name } = req.body;
   const userId = nextId++;
-  const socketId = userId.toString();
-  rooms.set(socketId, { userId, name, connectedAt: Date.now() });
+  usersMap.set(userId.toString(), { userId, name });
   console.log(`Registered: ${name} as user ${userId}`);
-  res.json({ userId, socketId });
+  res.json({ userId, socketId: userId.toString() });
 });
 
 app.get('/api/users', (req, res) => {
-  const userList = Array.from(rooms.values()).map(u => ({
+  const userList = Array.from(usersMap.values()).map(u => ({
     id: u.userId,
     name: u.name
   }));

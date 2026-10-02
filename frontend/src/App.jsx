@@ -30,7 +30,7 @@ function App() {
       try {
         const res = await fetch(`${API_URL}/api/users`);
         const allUsers = await res.json();
-        setUsers(allUsers.filter(u => u.id !== myId));
+        setUsers(allUsers.filter(u => u.id !== myId && u.name));
       } catch (err) {
         // Ignore
       }
