@@ -31,7 +31,7 @@ app.get('/api/users', (req, res) => {
 
 app.get('/api/rooms/:callId', (req, res) => {
   const room = rooms.get(req.params.callId);
-  if (!room) return res.status(404).json({ error: 'Not found' });
+  if (!room) return res.json({ state: 'none' });
   res.json(room);
 });
 

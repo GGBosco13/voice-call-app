@@ -46,7 +46,7 @@ function App() {
 
     const checkIncoming = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/users`);
+        const res = await fetch(`${API_URL}/api/users`, { signal: AbortSignal.timeout(5000) });
         const allUsers = await res.json();
         
         for (const user of allUsers) {
@@ -55,17 +55,15 @@ function App() {
           
           try {
             const roomRes = await fetch(`${API_URL}/api/rooms/${callId}`);
-            if (roomRes.ok) {
-              const room = await roomRes.json();
-              if (room.state === 'offered' && room.from === user.id) {
-                setIncomingCall({
-                  callId,
-                  fromId: user.id,
-                  fromName: room.fromName || user.name
-                });
-                showToast(`${user.name} is calling`, 'success');
-                break;
-              }
+            const room = await roomRes.json();
+            if (room.state === 'offered' && room.from === user.id) {
+              setIncomingCall({
+                callId,
+                fromId: user.id,
+                fromName: room.fromName || user.name
+              });
+              showToast(`${user.name} is calling`, 'success');
+              break;
             }
           } catch {}
         }
