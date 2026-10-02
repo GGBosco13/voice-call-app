@@ -16,6 +16,7 @@ function App() {
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
   const callTimerRef = useRef(null);
+  const connectedTimerRef = useRef(null);
   const pollingRef = useRef(null);
   const checkCallIntervalRef = useRef(null);
 
@@ -75,7 +76,7 @@ function App() {
 
   // Poll for ICE candidates during an active call
   useEffect(() => {
-    if (!currentCall || callState !== 'connected') return;
+    if (!currentCall) return;
 
     const pollICE = async () => {
       try {
@@ -92,11 +93,15 @@ function App() {
               peerConnectionRef.current._addedIce.add(key);
               try {
                 await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidateObj));
-              } catch {}
+              } catch (e) {
+                console.warn('Failed to add ICE candidate:', e);
+              }
             }
           }
         }
-      } catch {}
+      } catch (e) {
+        console.warn('ICE poll failed:', e);
+      }
     };
     const interval = setInterval(pollICE, 1000);
     pollICE();
@@ -214,11 +219,14 @@ function App() {
       };
 
       pc.onconnectionstatechange = () => {
-        console.log('Connection state:', pc.connectionState, 'signaling:', pc.signalingState, 'ice:', pc.iceConnectionState);
-        if (pc.connectionState === 'connected') {
+        const state = pc.connectionState;
+        const iceState = pc.iceConnectionState;
+        console.log('Caller connection state:', state, 'ICE:', iceState);
+        if (state === 'connected') {
           setCallState('connected');
           startCallTimer();
-        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        } else if (state === 'disconnected' || state === 'failed' || iceState === 'failed') {
+          console.log('Caller call failed, ending...');
           endCall();
         }
       };
@@ -328,8 +336,10 @@ function App() {
               type: 'answer',
               sdp: room.answer.sdp || room.answer
             }));
-            setCallState('connected');
-            startCallTimer();
+            console.log('Caller set remote description (answer), waiting for connection...');
+            // Don't set connected here - let onconnectionstatechange handle it
+            // Keep polling for the actual connection state
+            return; // Stop polling once we got the answer
           }
         } else if (room.state === 'ended' || room.state === 'declined') {
           endCall();
@@ -436,11 +446,14 @@ function App() {
       };
 
       pc.onconnectionstatechange = () => {
-        console.log('Connection state:', pc.connectionState, 'signaling:', pc.signalingState, 'ice:', pc.iceConnectionState);
-        if (pc.connectionState === 'connected') {
+        const state = pc.connectionState;
+        const iceState = pc.iceConnectionState;
+        console.log('Callee connection state:', state, 'ICE:', iceState);
+        if (state === 'connected') {
           setCallState('connected');
           startCallTimer();
-        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        } else if (state === 'disconnected' || state === 'failed' || iceState === 'failed') {
+          console.log('Callee call failed, ending...');
           endCall();
         }
       };
