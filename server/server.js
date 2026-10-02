@@ -36,18 +36,18 @@ app.get('/api/rooms/:callId', (req, res) => {
 });
 
 app.post('/api/rooms/:callId/offer', (req, res) => {
-  const { callId, offer, from, to } = req.body;
-  // Create room if it doesn't exist
+  const { callId, offer, from, to, fromName } = req.body;
   if (!rooms.has(callId)) {
-    rooms.set(callId, { from, to, state: 'offered', offer });
+    rooms.set(callId, { from, to, fromName, state: 'offered', offer });
   } else {
     const room = rooms.get(callId);
     room.from = from;
     room.to = to;
+    room.fromName = fromName || room.fromName;
     room.offer = offer;
     room.state = 'offered';
   }
-  console.log(`Offer sent from ${from} to ${to} for room ${callId}`);
+  console.log(`Offer from ${fromName || from} to ${to} for room ${callId}`);
   res.json({ status: 'sent' });
 });
 

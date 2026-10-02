@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const API_URL = window.location.origin;
 
@@ -7,22 +7,24 @@ function App() {
   const [myName, setMyName] = useState('');
   const [myId, setMyId] = useState(null);
   const [users, setUsers] = useState([]);
-  const [callState, setCallState] = useState('idle'); // idle, calling, ringing, connecting, connected
+  const [callState, setCallState] = useState('idle');
   const [currentCall, setCurrentCall] = useState(null);
   const [callTimer, setCallTimer] = useState(0);
+  const [incomingCall, setIncomingCall] = useState(null);
   const [toast, setToast] = useState(null);
 
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
   const callTimerRef = useRef(null);
   const pollingRef = useRef(null);
+  const checkCallIntervalRef = useRef(null);
 
   function showToast(message, type = '') {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   }
 
-  // Fetch users periodically (polling-based signaling)
+  // Fetch users
   useEffect(() => {
     const fetchUsers = async () => {
       try {
@@ -30,13 +32,47 @@ function App() {
         const allUsers = await res.json();
         setUsers(allUsers.filter(u => u.id !== myId));
       } catch (err) {
-        console.error('Failed to fetch users:', err);
+        // Ignore
       }
     };
-
     fetchUsers();
     const interval = setInterval(fetchUsers, 2000);
     return () => clearInterval(interval);
+  }, [myId]);
+
+  // Poll for incoming calls
+  useEffect(() => {
+    if (!myId) return;
+
+    const checkIncoming = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/users`);
+        const allUsers = await res.json();
+        
+        for (const user of allUsers) {
+          if (user.id === myId) continue;
+          const callId = `${Math.min(user.id, myId)}-${Math.max(user.id, myId)}`;
+          
+          try {
+            const roomRes = await fetch(`${API_URL}/api/rooms/${callId}`);
+            if (roomRes.ok) {
+              const room = await roomRes.json();
+              if (room.state === 'offered' && room.from === user.id) {
+                setIncomingCall({
+                  callId,
+                  fromId: user.id,
+                  fromName: room.fromName || user.name
+                });
+                showToast(`${user.name} is calling`, 'success');
+                break;
+              }
+            }
+          } catch {}
+        }
+      } catch {}
+    };
+    checkCallIntervalRef.current = setInterval(checkIncoming, 3000);
+    return () => clearInterval(checkCallIntervalRef.current);
   }, [myId]);
 
   function handleLogin(e) {
@@ -53,73 +89,37 @@ function App() {
       setMyId(data.userId);
       setIsLoggedIn(true);
     })
-    .catch(err => {
-      console.error('Registration failed:', err);
-      showToast('Failed to connect', 'error');
-    });
+    .catch(err => showToast('Failed to connect', 'error'));
   }
 
+  // Call someone
   async function startCall(targetUserId, targetUserName) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
 
-      const callId = `${Date.now()}-${targetUserId}`;
+      // Shared call ID: both caller and receiver know the IDs, so they can derive it
+      const callId = `${Math.min(myId, targetUserId)}-${Math.max(myId, targetUserId)}`;
       setCallState('calling');
-      setCurrentCall({ to: targetUserId, toName: targetUserName, callId });
+      setCurrentCall({ to: targetUserId, toName: targetUserName, callId, isOutgoing: true });
 
-      const pc = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun.cloudflare.com:3478' },
-        ],
-      });
+      const pc = createPeerConnection();
       peerConnectionRef.current = pc;
-
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          fetch(`${API_URL}/api/rooms/${callId}/ice`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              callId,
-              candidate: event.candidate,
-              from: myId,
-              to: targetUserId
-            })
-          }).catch(err => console.error('ICE fetch failed:', err));
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'connected') {
-          setCallState('connected');
-          startCallTimer();
-        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-          endCall();
-        }
-      };
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-
       await new Promise(resolve => setTimeout(resolve, 500));
 
       await fetch(`${API_URL}/api/rooms/${callId}/offer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          callId,
-          offer: pc.localDescription,
-          from: myId,
-          to: targetUserId
+          callId, offer: pc.localDescription, from: myId, to: targetUserId,
+          fromName: myName
         })
-      }).catch(err => console.error('Offer fetch failed:', err));
+      }).catch(() => {});
 
-      // Poll for answer
-      pollForAnswer(callId, targetUserId);
+      pollForAnswer(callId);
 
     } catch (err) {
       console.error('Error starting call:', err);
@@ -127,7 +127,47 @@ function App() {
     }
   }
 
-  function pollForAnswer(callId, targetUserId) {
+  function createPeerConnection() {
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+      ],
+    });
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => pc.addTrack(track, localStreamRef.current));
+    }
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && currentCall) {
+        fetch(`${API_URL}/api/rooms/${currentCall.callId}/ice`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            callId: currentCall.callId,
+            candidate: event.candidate,
+            from: myId,
+            to: currentCall.to
+          })
+        }).catch(() => {});
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') {
+        setCallState('connected');
+        startCallTimer();
+      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        endCall();
+      }
+    };
+
+    return pc;
+  }
+
+  // Poll for answer (caller side)
+  function pollForAnswer(callId) {
     const poll = async () => {
       try {
         const res = await fetch(`${API_URL}/api/rooms/${callId}`);
@@ -139,8 +179,9 @@ function App() {
             setCallState('connected');
             startCallTimer();
           }
-        } else if (room.state === 'ended') {
+        } else if (room.state === 'ended' || room.state === 'declined') {
           endCall();
+          if (room.state === 'declined') showToast('Call declined', 'error');
         } else {
           pollingRef.current = setTimeout(poll, 1500);
         }
@@ -151,31 +192,69 @@ function App() {
     poll();
   }
 
-  // Poll for incoming calls (check if there's an unanswered offer for us)
-  useEffect(() => {
-    if (!myId) return;
+  // Answer an incoming call
+  async function acceptCall(callId, fromUserId, fromUserName) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStreamRef.current = stream;
 
-    const checkIncoming = async () => {
-      try {
-        // Check all rooms for unanswered calls directed at us
-        const usersRes = await fetch(`${API_URL}/api/users`);
-        const allUsers = await usersRes.json();
-        
-        for (const user of allUsers) {
-          if (user.id === myId) continue;
-          const callId = `${Date.now()}-${myId}`;
-          
-          // Try checking rooms - this is a simplified approach
-          // We check by looking at the room state
-        }
-      } catch (err) {
-        // Ignore errors
-      }
-    };
+      const pc = createPeerConnection();
+      peerConnectionRef.current = pc;
 
-    const interval = setInterval(checkIncoming, 3000);
-    return () => clearInterval(interval);
-  }, [myId]);
+      setCallState('connected');
+      setCurrentCall({ to: fromUserId, toName: fromUserName, callId, isOutgoing: false });
+
+      // Get the offer from the room
+      const res = await fetch(`${API_URL}/api/rooms/${callId}`);
+      const room = await res.json();
+
+      await pc.setRemoteDescription(new RTCSessionDescription(room.offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      await fetch(`${API_URL}/api/rooms/${callId}/answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callId, answer: pc.localDescription, from: myId, to: fromUserId
+        })
+      }).catch(() => {});
+
+      startCallTimer();
+      setIncomingCall(null);
+
+    } catch (err) {
+      console.error('Error answering call:', err);
+      setIncomingCall(null);
+    }
+  }
+
+  function declineCall() {
+    if (incomingCall && incomingCall.callId) {
+      // Mark the room as declined
+      const fetchDecline = async () => {
+        try {
+          const res = await fetch(`${API_URL}/api/rooms/${incomingCall.callId}`);
+          const room = await res.json();
+          room.state = 'declined';
+        } catch {}
+      };
+      fetchDecline();
+    }
+    setIncomingCall(null);
+    showToast('Call declined', 'error');
+  }
+
+  function cancelCall() {
+    if (currentCall) {
+      fetch(`${API_URL}/api/rooms/${currentCall.callId}/end`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callId: currentCall.callId })
+      }).catch(() => {});
+    }
+    cleanupCall();
+  }
 
   function endCall() {
     if (currentCall) {
@@ -208,6 +287,7 @@ function App() {
     setCallState('idle');
     setCallTimer(0);
     setCurrentCall(null);
+    setIncomingCall(null);
   }
 
   function startCallTimer() {
@@ -280,14 +360,39 @@ function App() {
         </div>
       </div>
 
-      {/* Calling Screen */}
-      {(callState === 'calling' || callState === 'ringing' || callState === 'connecting') && currentCall && (
+      {/* Incoming Call Screen */}
+      {incomingCall && (
+        <div className="call-screen incoming-call-screen">
+          <div className="call-screen-avatar incoming-pulse">
+            {incomingCall.fromName.charAt(0).toUpperCase()}
+          </div>
+          
+          <div className="call-screen-name">
+            {incomingCall.fromName}
+          </div>
+          
+          <div className="call-screen-status" style={{ color: '#4ade80', marginBottom: '40px' }}>
+            Incoming call...
+          </div>
+          
+          <div className="call-screen-controls incoming-controls">
+            <button className="call-screen-hangup" style={{ background: 'linear-gradient(135deg, #00c853, #009624)' }} onClick={() => acceptCall(incomingCall.callId, incomingCall.fromId, incomingCall.fromName)}>
+              <span className="hangup-icon">✓</span>
+              <span>Answer</span>
+            </button>
+            <button className="call-screen-cancel" onClick={declineCall}>
+              ✕ Decline
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Calling/Connecting Screen */}
+      {(callState === 'calling' || callState === 'connecting') && currentCall && (
         <div className="call-screen">
           <div className="call-screen-header">
             <span className="call-screen-status">
-              {callState === 'calling' && '📞 Calling...'}
-              {callState === 'ringing' && '🔔 Ringing...'}
-              {callState === 'connecting' && '🔗 Connecting...'}
+              {callState === 'calling' ? '📞 Calling...' : '🔗 Connecting...'}
             </span>
           </div>
           
@@ -299,7 +404,7 @@ function App() {
             {currentCall.toName}
           </div>
           
-          <button className="call-screen-cancel" onClick={endCall}>
+          <button className="call-screen-cancel" onClick={cancelCall}>
             ✕ Cancel
           </button>
         </div>
@@ -335,8 +440,8 @@ function App() {
         </div>
       )}
 
-      {/* Users List - hidden during call */}
-      {callState === 'idle' && (
+      {/* Users List */}
+      {callState === 'idle' && !incomingCall && (
         <div className="users-section">
           <h3>
             {users.length > 0 ? `Online Users (${users.length})` : 'No Users Online'}
@@ -370,10 +475,7 @@ function App() {
               <div className="icon">👥</div>
               <p>No other users online yet</p>
               <p style={{ fontSize: '0.85rem', marginTop: '5px' }}>
-                Open the same link in another browser/tab with a different name to see each other
-              </p>
-              <p style={{ fontSize: '0.8rem', marginTop: '10px', color: '#555' }}>
-                💡 Tip: Open this page twice in your browser — once with name "Alice", once with "Bob"
+                Open the same link in another browser/tab with a different name
               </p>
             </div>
           )}

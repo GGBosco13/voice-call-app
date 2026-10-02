@@ -412,6 +412,44 @@ body {
   box-shadow: 0 10px 40px rgba(233, 69, 96, 0.3);
 }
 
+.incoming-call-screen .call-screen-avatar.incoming-pulse {
+  animation: incomingPulse 1.5s infinite;
+}
+
+@keyframes incomingPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5); transform: scale(1); }
+  50% { box-shadow: 0 0 0 25px rgba(74, 222, 128, 0); transform: scale(1.05); }
+}
+
+.incoming-controls {
+  flex-direction: row;
+  justify-content: center;
+}
+
+.incoming-controls .call-screen-cancel {
+  margin-top: 0;
+  margin-left: 20px;
+  background: linear-gradient(135deg, #e94560, #c23152);
+  border-color: #e94560;
+  color: #fff;
+  box-shadow: 0 8px 30px rgba(233, 69, 96, 0.4);
+}
+
+.call-screen-avatar {
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #533483, #e94560);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3.5rem;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 25px;
+  box-shadow: 0 10px 40px rgba(233, 69, 96, 0.3);
+}
+
 .call-screen-name {
   font-size: 1.8rem;
   font-weight: 600;
