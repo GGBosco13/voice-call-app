@@ -129,8 +129,39 @@ function App() {
       setCallState('calling');
       setCurrentCall({ to: targetUserId, toName: targetUserName, callId, isOutgoing: true });
 
-      const pc = createPeerConnection();
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' },
+          {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelay@metered.ca',
+            credential: 'openrelayproject',
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelay@metered.ca',
+            credential: 'openrelayproject',
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelay@metered.ca',
+            credential: 'openrelayproject',
+          },
+          {
+            urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelay@metered.ca',
+            credential: 'openrelayproject',
+          },
+        ],
+      });
       peerConnectionRef.current = pc;
+
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -157,7 +188,34 @@ function App() {
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
         { urls: 'stun:stun.cloudflare.com:3478' },
+        { urls: 'stun:stun.l.google.com:19302?transport=udp' },
+        { urls: 'stun:stun.l.google.com:19302?transport=tcp' },
+        { urls: 'stun:stun.l.google.com:19302?transport=tls' },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelay@metered.ca',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelay@metered.ca',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelay@metered.ca',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelay@metered.ca',
+          credential: 'openrelayproject',
+        },
       ],
     });
 
@@ -227,7 +285,31 @@ function App() {
       const pc = new RTCPeerConnection({
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
           { urls: 'stun:stun.cloudflare.com:3478' },
+          {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelay@metered.ca',
+            credential: 'openrelayproject',
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelay@metered.ca',
+            credential: 'openrelayproject',
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelay@metered.ca',
+            credential: 'openrelayproject',
+          },
+          {
+            urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelay@metered.ca',
+            credential: 'openrelayproject',
+          },
         ],
       });
       peerConnectionRef.current = pc;
