@@ -82,11 +82,7 @@ app.post('/api/rooms/:callId/ice', (req, res) => {
   }
   const room = rooms.get(callId);
   room.iceCandidates = room.iceCandidates || [];
-  room.iceCandidates.push({ candidate, from });
-  // Store separate lists for each direction
-  if (!room.candidatesFor) room.candidatesFor = {};
-  if (!room.candidatesFor[to]) room.candidatesFor[to] = [];
-  room.candidatesFor[to].push({ candidate, from });
+  room.iceCandidates.push(candidate);
   res.json({ status: 'received' });
 });
 

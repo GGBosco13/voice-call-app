@@ -81,11 +81,13 @@ function App() {
       try {
         const res = await fetch(`${API_URL}/api/rooms/${currentCall.callId}`);
         const room = await res.json();
-        // Get candidates meant for us (the other person sent them)
-        const candidates = room.candidatesFor && room.candidatesFor[myId];
-        if (candidates) {
-          for (const ice of candidates) {
-            if (peerConnectionRef.current) {
+        if (room.iceCandidates && peerConnectionRef.current) {
+          // Track which candidates we've already added
+          for (const ice of room.iceCandidates) {
+            if (!peerConnectionRef.current._addedIce) peerConnectionRef.current._addedIce = new Set();
+            const key = JSON.stringify(ice);
+            if (!peerConnectionRef.current._addedIce.has(key)) {
+              peerConnectionRef.current._addedIce.add(key);
               try {
                 await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(ice));
               } catch {}
@@ -222,16 +224,42 @@ function App() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
 
-      const pc = createPeerConnection();
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' },
+        ],
+      });
       peerConnectionRef.current = pc;
 
-      // Get the offer and pending ICE candidates from the room
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          fetch(`${API_URL}/api/rooms/${callId}/ice`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ callId, candidate: event.candidate, from: myId, to: fromUserId })
+          }).catch(() => {});
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+          setCallState('connected');
+          startCallTimer();
+        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+          endCall();
+        }
+      };
+
+      // Get the offer and pending ICE from the room
       const res = await fetch(`${API_URL}/api/rooms/${callId}`);
       const room = await res.json();
 
-      // Pre-add any pending ICE candidates before setting the remote description
-      if (room.candidatesFor && room.candidatesFrom) {
-        for (const ice of room.candidatesFrom) {
+      // Pre-add any pending ICE candidates
+      if (room.iceCandidates) {
+        for (const ice of room.iceCandidates) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(ice));
           } catch {}
@@ -245,9 +273,7 @@ function App() {
       await fetch(`${API_URL}/api/rooms/${callId}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          callId, answer: pc.localDescription, from: myId, to: fromUserId
-        })
+        body: JSON.stringify({ callId, answer: pc.localDescription, from: myId, to: fromUserId })
       }).catch(() => {});
 
       setCallState('connected');
