@@ -4,10 +4,15 @@ package-lock.json
 
 # Environment files with secrets
 .env
+*.local.env
 
 # Build output
 dist/
+frontend/dist/
 build/
+
+# Render config
+render.yaml
 
 # IDE
 .idea/

@@ -592,12 +592,31 @@ function tryRouteCall() {
 const path = require('path');
 const fs = require('fs');
 
-// Serve built React SPA (for production/mobile access on single port)
-app.use(express.static(path.join(__dirname, '../../frontend/dist')));
+// Serve built React SPA
+// When running from start.js:  ../../frontend/dist (from backend/)
+// When running from src/:     ../../../frontend/dist (from backend/src/)
+// When running on Render:     ../../frontend/dist (from backend/)
+function resolveStaticDir() {
+  const candidates = [
+    path.join(__dirname, '../frontend/dist'),    // from src/
+    path.join(__dirname, '../../frontend/dist'),  // from backend/
+    path.join(__dirname, 'dist'),                 // from dist/
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'index.html'))) {
+      return dir;
+    }
+  }
+  // Default fallback
+  return path.join(__dirname, '../../frontend/dist');
+}
+
+const STATIC_DIR = resolveStaticDir();
+app.use(express.static(STATIC_DIR));
 
 // SPA fallback — serve index.html for all non-API routes
 app.get('*', (req, res) => {
-  const indexPath = path.join(__dirname, '../../frontend/dist/index.html');
+  const indexPath = path.join(STATIC_DIR, 'index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
