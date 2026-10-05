@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  # Redis — ephemeral session storage with TTL
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Backend — Node.js + Socket.IO + WebRTC signaling
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - SUPER_ADMIN_ID=${SUPER_ADMIN_ID:-whisper-admin}
+      - SUPER_ADMIN_PASSWORD=${SUPER_ADMIN_PASSWORD:-whisper-admin-2024}
+      - STUN_SERVERS=["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302"]
+      # TURN server (optional — uncomment and fill for production)
+      # - TURN_SERVERS=["turn:your-turn-server.com:3478?transport=tcp"]
+      # - TURN_USERNAME=
+      # - TURN_PASSWORD=
+      - FRONTEND_URL=http://localhost:80
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Frontend — Nginx serves React SPA
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  redis-data:
